@@ -2,8 +2,8 @@ import re
 import os
 import torch
 from torch.utils.data import DataLoader
-from torch import Tensor
-from typing import Union, List
+# from torch import Tensor
+# from typing import Union, List
 
 
 def rename_or_set_default(names, namespace, name, default):
@@ -262,7 +262,49 @@ class Trainer:
     def test(self):
         self._test("test")
 
-    # TODO: Loop is too long. Modularize
+    def _batch_end(self, retval, batch_num):
+        self.running_loss += retval["loss"]
+        if batch_num % self.args.print_freq == max(0, self.args.print_freq - 1):
+            self.logger.info('[%d, %5d] loss: %.3f. %f percent epoch done' %
+                             (self.epoch + 1, batch_num + 1,
+                              self.running_loss,
+                              batch_num / len(self.train_loader) * 100))
+            self.running_loss = 0.0
+        if self.model_name == "classifier":
+            return retval["total"], retval["loss"], retval["accuracy"]
+        else:
+            return retval["total"], retval["loss"]
+
+    def _log_epoch_end_loss(self, total, epoch_loss, accuracy):
+        self.losses.append(('train', self.epoch, epoch_loss))
+        if self.model._model_name == "classifier":
+            self.accuracies.append(('train', self.epoch, accuracy))
+        self.losses.append(('train', self.epoch, epoch_loss))
+        self.logger.info('Average loss of the network on %d images: %f'
+                         % (total, epoch_loss/len(self.train_loader)))
+        if self.model._model_name == "classifier":
+            self.logger.info('Average accuracy of the network on %d images: %f'
+                             % (total, accuracy/len(self.train_loader)))
+
+    def _validate_and_test(self):
+        if self.val_loader is not None:
+            self.validate()
+        else:
+            self.logger.info("No val loader. Skipping")
+        if self.epoch % 5 == 4:
+            if self.test_loader is not None:
+                self.test(self.epoch)
+            else:
+                self.logger.info("No test loader. Skipping")
+        if self._anneal:
+            self.anneal()
+
+    def _epoch_end_save(self, epoch_loss, old_epoch_loss):
+        self.logger.info("Saving checkpoint to %s" % self.args.checkpoint_path)
+        self.logger.info("Epoch loss and prev epoch loss: %f %f" % (epoch_loss, old_epoch_loss))
+        self._save(self.args.checkpoint_path)
+        self.check_and_save()
+
     def train(self):
         self.validate(True)
         self.logger.debug("Beginning training")
@@ -270,39 +312,22 @@ class Trainer:
         total = 0
         epoch_loss = 0.0
         old_epoch_loss = 0.0
+        accuracy = 0.0
         while self.epoch < self.args.max_epochs:
-            running_loss = 0.0
+            self.running_loss = 0.0
             for i, batch in enumerate(self.train_loader):
                 retval = self.steps["train"](self, batch)
-                loss = retval["loss"]
-                total += retval["total"]
-                running_loss += loss
-                epoch_loss += loss
-                if i % self.args.print_freq == max(0, self.args.print_freq - 1):
-                    self.logger.info('[%d, %5d] loss: %.3f. %f percent epoch done' %
-                                     (self.epoch + 1, i + 1,
-                                      running_loss,
-                                      i / len(self.train_loader) * 100))
-                    running_loss = 0.0
-            self.losses.append(('train', self.epoch, epoch_loss))
-            self.logger.info('Average loss of the network on %d images: %f'
-                             % (total, epoch_loss/len(self.train_loader)))  # mse loss is already averaged
-            if self.val_loader is not None:
-                self.validate()
-            else:
-                self.logger.info("No val loader. Skipping")
-            total = 0.0
-            if self.epoch % 5 == 4:
-                if self.test_loader is not None:
-                    self.test(self.epoch)
+                if self._model_name == "classifier":
+                    count, loss, batch_accuracy = self._batch_end(retval)
+                    accuracy += batch_accuracy
                 else:
-                    self.logger.info("No test loader. Skipping")
-            if self._anneal:
-                self.anneal()
-            self.logger.info("Saving checkpoint to %s" % self.args.checkpoint_path)
-            self.logger.info("Epoch loss and old epoch loss: %f %f" % (epoch_loss, old_epoch_loss))
-            self._save(self.args.checkpoint_path)
-            self.check_and_save()
+                    count, loss = self._batch_end(retval)
+                epoch_loss += loss
+                total += count
+            self._log_epoch_end_loss(total, epoch_loss, accuracy)
+            self._validate_and_test()
+            total = 0.0
+            self._epoch_end_save(epoch_loss, old_epoch_loss)
             old_epoch_loss = epoch_loss
             epoch_loss = 0.0
             self.epoch += 1
@@ -315,16 +340,21 @@ class Trainer:
                 param_group['lr'] *= .9
             self.logger.info("Annealing...")
 
-    # TODO: Sample should not return Tensor but instead visualizable values
-    #       It's hard to quantify what a "visualizable" value is.
-    def sample(self, inputs: Union[List[Union[int, float]],
-                                   Tensor[Union[int, float]]]) -> Tensor[Union[int, float]]:
-        """Skeleton sample function, see PEP 484, and mypy for how the typing hint
-        syntax works. Docstring is automatically generated.
-
-        :param inputs: 
-        :returns: 
-        :rtype:
-
-        """
+    def sample(self):
         raise NotImplementedError
+
+    # FIXME: The syntax for typing hints wasn't correct. Have to figure out
+    #        how to include types for torch.Tensor
+    # # TODO: Sample should not return Tensor but instead visualizable values
+    # #       It's hard to quantify what a "visualizable" value is.
+    # def sample(self, inputs: Union[List[Union[int, float]],
+    #                                Tensor[Union[int, float]]]) -> Tensor[Union[int, float]]:
+    #     """Skeleton sample function, see PEP 484, and mypy for how the typing hint
+    #     syntax works. Docstring is automatically generated.
+
+    #     :param inputs: 
+    #     :returns: 
+    #     :rtype:
+
+    #     """
+    #     raise NotImplementedError
