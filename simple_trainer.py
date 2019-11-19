@@ -1,3 +1,4 @@
+import ipdb
 import re
 import os
 import torch
@@ -49,35 +50,7 @@ class Trainer:
         self.accuracies = []
         self.prev_len_var_check = 0
         self.epoch = 0
-        if self.args.resume_checkpoint:
-            assert not self.args.init_weights and not self.args.resume_best
-            self._resume_path = os.path.join(self._savedir, self.args.checkpoint_name)
-            assert os.path.isfile(self._resume_path) and os.path.exists(self._resume_path)
-            self.logger.info("Trying to resume from checkpoint")
-            self._resume()
-        elif self.args.resume_from_weights:
-            assert not self.args.init_weights and not self.args.resume_best and not self.args.resume_checkpoint
-            assert os.path.exists(self.args.resume_from_weights)
-            self._resume_path = self.args.resume_from_weights
-            self.logger.info("Trying to resume from given weights")
-            self._resume()
-            # TODO: resume_best assumes "val_acc" in file name
-        elif self.args.resume_best:
-            assert os.path.exists(os.path.join(self._savedir)) and os.listdir(self._savedir)
-            # Assuming for each training session the directory is the same
-            save_files = os.listdir(self._savedir)
-            # FIXME
-            if "checkpoint.pth" in save_files:
-                save_files.remove("checkpoint.pth")
-            save_files = [(f, re.search("val_.....", f).group()) for f in save_files]
-            save_files.sort(key=lambda x: x[1])
-            self._resume_path = os.path.join(self._savedir, save_files[-1][0])
-            self._resume()
-        elif self.args.init_weights:
-            assert not self.args.resume_checkpoint and not self.args.resume_best
-            assert os.path.exists(self.args.init_weights) and os.path.isfile(self.args.init_weights)
-            self.logger.info("Trying to load torch save directly into model")
-            self._load_init_weights()
+        self._check_resume()
 
     def _sanity_check(self, args):
         assert 'lr' in args.__dict__ and args.lr > 0, "Learning rate must exist and be > 0"
@@ -101,7 +74,8 @@ class Trainer:
 
     def _init_model(self, model):
         self.model = model
-        if not self.args.cuda or not self.args.gpus or self.args.gpus == "cpu":
+        if (not self.args.cuda or not self.args.gpus or
+                self.args.gpus == "cpu" or not torch.cuda.is_available()):
             self.device = torch.device("cpu")
         elif len(self.args.gpus) == 1:
             self.device = torch.device("cuda:%d" % self.args.gpus[0])
@@ -129,6 +103,41 @@ class Trainer:
     def _load_init_weights(self):
         self.logger.warn("Warning! Loading directly to model")
         self.model.load_state_dict(torch.load(self.args.init_weights).state_dict())
+
+    def _check_resume(self):
+        if self.args.resume_checkpoint:
+            if os.path.exists(self.args.checkpoint_path):
+                assert not self.args.init_weights and not self.args.resume_best
+                self._resume_path = os.path.join(self._savedir, self.args.checkpoint_name)
+                assert os.path.isfile(self._resume_path) and os.path.exists(self._resume_path)
+                self.logger.info("Trying to resume from checkpoint")
+                self._resume()
+            else:
+                self.logger.info("Checkpoint not found. Will train from beginning")
+        elif self.args.resume_from_weights:
+            assert (not self.args.init_weights and not self.args.resume_best and
+                    not self.args.resume_checkpoint)
+            assert os.path.exists(self.args.resume_from_weights)
+            self._resume_path = self.args.resume_from_weights
+            self.logger.info("Trying to resume from given weights")
+            self._resume()
+            # TODO: resume_best assumes "val_acc" in file name
+        elif self.args.resume_best:
+            assert os.path.exists(os.path.join(self._savedir)) and os.listdir(self._savedir)
+            # Assuming for each training session the directory is the same
+            save_files = os.listdir(self._savedir)
+            # FIXME
+            if "checkpoint.pth" in save_files:
+                save_files.remove("checkpoint.pth")
+            save_files = [(f, re.search("val_.....", f).group()) for f in save_files]
+            save_files.sort(key=lambda x: x[1])
+            self._resume_path = os.path.join(self._savedir, save_files[-1][0])
+            self._resume()
+        elif self.args.init_weights:
+            assert not self.args.resume_checkpoint and not self.args.resume_best
+            assert os.path.exists(self.args.init_weights) and os.path.isfile(self.args.init_weights)
+            self.logger.info("Trying to load torch save directly into model")
+            self._load_init_weights()
 
     def _resume(self):
         self.logger.info("Resuming from %s" % self._resume_path)
@@ -193,8 +202,8 @@ class Trainer:
         # TODO: Make this more generic
         check_losses = [l[2] for l in self.losses if l[0] == save_on]
         check_accuracies = [l[2] for l in self.accuracies if l[0] == save_on]
-        # FIXME
-        # train_accuracies = [l[2] for l in self.accuracies if l[0] == 'train']
+        if self.model._model_name == "classifier":
+            train_accuracies = [l[2] for l in self.accuracies if l[0] == 'train']
         train_losses = [l[2] for l in self.losses if l[0] == 'train']
         if metavar == 'accuracies':
             _var_to_check = check_accuracies
@@ -207,19 +216,21 @@ class Trainer:
         if _var_to_check and len(_var_to_check) > self.prev_len_var_check:
             self.prev_len_var_check += 1
             cur_train_loss = train_losses[-1]
-            # if train_accuracies:
-            #     cur_train_acc = train_accuracies[-1]
+            if self.model._model_name == "classifier" and train_accuracies:
+                cur_train_acc = train_accuracies[-1]
             _cur_check_var = _var_to_check[-1]
             save_name_dict = dict([('model', self.model.__class__.__name__),
                                    ('epoch', self.epoch),
                                    ('drop_ratio', self.args.drop_ratio),
                                    ('fc_drop_ratio', self.args.fc_drop_ratio),
                                    ('train_loss', cur_train_loss),
-                                   ('_'.join([save_on, 'loss']), check_losses[-1]),
-                                   # TODO: Make this more generic
-                                   # ('train_acc', cur_train_acc),
-                                   # ('_'.join([save_on, 'acc']), check_accuracies[-1]),
-                                   ('train_batch_size', self._dataloader_params["train"]["batch_size"])])
+                                   ('_'.join([save_on, 'loss']), check_losses[-1])])
+            if self.model._model_name == "classifier":
+                save_name_dict.update(dict([('train_acc', cur_train_acc),
+                                            ('_'.join([save_on, 'acc']), check_accuracies[-1])]))
+            else:
+                save_name_dict.update(dict([('train_batch_size',
+                                             self._dataloader_params["train"]["batch_size"])]))
             if len(_var_to_check) == 1:
                 self.logger.info('Saving model as ' + str(save_name_dict))
                 self._save(save_name_dict)
@@ -244,10 +255,13 @@ class Trainer:
             loader = self.test_loader
         total = 0
         loss = 0
+        accuracy = 0.0
         for i, batch in enumerate(loader):
             retval = self.steps[val_test](self, batch)
             loss += retval["loss"]
             total += retval["total"]
+            if self.model._model_name == "classifier":
+                accuracy += 100 * (retval["correct"]/total)
             if debug:
                 print(retval["outputs"].cpu().numpy(), retval["targets"].cpu().numpy())
                 import ipdb
@@ -255,6 +269,10 @@ class Trainer:
         self.losses.append((val_test, self.epoch, float(loss)))
         self.logger.info('Average loss for of the network on %d %s images: %f' %
                          (total, val_test, loss/len(loader)))
+        if self.model._model_name == "classifier":
+            self.accuracies.append((val_test, self.epoch, accuracy/(len(loader))))
+            self.logger.info('Average accuracy for of the network on %d %s images: %f' %
+                             (total, val_test, accuracy/(len(loader))))
 
     def validate(self, debug=False):
         self._test("val", debug)
@@ -270,8 +288,8 @@ class Trainer:
                               self.running_loss,
                               batch_num / len(self.train_loader) * 100))
             self.running_loss = 0.0
-        if self.model_name == "classifier":
-            return retval["total"], retval["loss"], retval["accuracy"]
+        if self.model._model_name == "classifier":
+            return retval["total"], retval["loss"], 100 * (retval["correct"]/retval["total"])
         else:
             return retval["total"], retval["loss"]
 
@@ -306,7 +324,6 @@ class Trainer:
         self.check_and_save()
 
     def train(self):
-        self.validate(True)
         self.logger.debug("Beginning training")
         self.logger.debug("Total number of batches %d" % len(self.train_loader))
         total = 0
@@ -317,14 +334,15 @@ class Trainer:
             self.running_loss = 0.0
             for i, batch in enumerate(self.train_loader):
                 retval = self.steps["train"](self, batch)
-                if self._model_name == "classifier":
-                    count, loss, batch_accuracy = self._batch_end(retval)
+                if self.model._model_name == "classifier":
+                    count, loss, batch_accuracy = self._batch_end(retval, i)
                     accuracy += batch_accuracy
                 else:
-                    count, loss = self._batch_end(retval)
+                    count, loss = self._batch_end(retval, i)
                 epoch_loss += loss
                 total += count
-            self._log_epoch_end_loss(total, epoch_loss, accuracy)
+                ipdb.set_trace()
+            self._log_epoch_end_loss(total, epoch_loss, accuracy/len(self.train_loader))
             self._validate_and_test()
             total = 0.0
             self._epoch_end_save(epoch_loss, old_epoch_loss)
