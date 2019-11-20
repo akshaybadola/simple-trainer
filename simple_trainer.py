@@ -1,4 +1,3 @@
-import ipdb
 import re
 import os
 import torch
@@ -64,10 +63,12 @@ class Trainer:
         rename_or_set_default(['checkpoint_path', 'checkpoint', 'checkpoint_name'],
                               args, 'checkpoint_path', 'checkpoint.pth')
         rename_or_set_default(['resume_best'], args, 'resume_best', False)
+        rename_or_set_default(['anneal'], args, 'anneal', False)
         rename_or_set_default(['resume_checkpoint'], args, 'resume_checkpoint', False)
         rename_or_set_default(['init_weights', 'weights'], args, 'init_weights', None)
         if not os.path.exists(args.savedir):
             os.mkdir(args.savedir)
+        self._anneal = args.anneal
         self._savedir = args.savedir
         self.max_epochs = args.max_epochs
         return args
@@ -255,13 +256,13 @@ class Trainer:
             loader = self.test_loader
         total = 0
         loss = 0
-        accuracy = 0.0
+        correct = 0
         for i, batch in enumerate(loader):
             retval = self.steps[val_test](self, batch)
             loss += retval["loss"]
             total += retval["total"]
             if self.model._model_name == "classifier":
-                accuracy += 100 * (retval["correct"]/total)
+                correct += retval["correct"]
             if debug:
                 print(retval["outputs"].cpu().numpy(), retval["targets"].cpu().numpy())
                 import ipdb
@@ -270,9 +271,9 @@ class Trainer:
         self.logger.info('Average loss for of the network on %d %s images: %f' %
                          (total, val_test, loss/len(loader)))
         if self.model._model_name == "classifier":
-            self.accuracies.append((val_test, self.epoch, accuracy/(len(loader))))
+            self.accuracies.append((val_test, self.epoch, 100 * (correct/total)))
             self.logger.info('Average accuracy for of the network on %d %s images: %f' %
-                             (total, val_test, accuracy/(len(loader))))
+                             (total, val_test, 100 * (correct/total)))
 
     def validate(self, debug=False):
         self._test("val", debug)
@@ -289,7 +290,7 @@ class Trainer:
                               batch_num / len(self.train_loader) * 100))
             self.running_loss = 0.0
         if self.model._model_name == "classifier":
-            return retval["total"], retval["loss"], 100 * (retval["correct"]/retval["total"])
+            return retval["total"], retval["loss"], 100 * float(retval["correct"])/retval["total"]
         else:
             return retval["total"], retval["loss"]
 
@@ -302,11 +303,11 @@ class Trainer:
                          % (total, epoch_loss/len(self.train_loader)))
         if self.model._model_name == "classifier":
             self.logger.info('Average accuracy of the network on %d images: %f'
-                             % (total, accuracy/len(self.train_loader)))
+                             % (total, accuracy))
 
-    def _validate_and_test(self):
+    def _validate_and_test(self, debug=False):
         if self.val_loader is not None:
-            self.validate()
+            self.validate(debug)
         else:
             self.logger.info("No val loader. Skipping")
         if self.epoch % 5 == 4:
@@ -324,6 +325,7 @@ class Trainer:
         self.check_and_save()
 
     def train(self):
+        debug = False
         self.logger.debug("Beginning training")
         self.logger.debug("Total number of batches %d" % len(self.train_loader))
         total = 0
@@ -334,6 +336,8 @@ class Trainer:
             self.running_loss = 0.0
             for i, batch in enumerate(self.train_loader):
                 retval = self.steps["train"](self, batch)
+                if debug:
+                    print(retval["correct"], retval["total"])
                 if self.model._model_name == "classifier":
                     count, loss, batch_accuracy = self._batch_end(retval, i)
                     accuracy += batch_accuracy
@@ -341,10 +345,10 @@ class Trainer:
                     count, loss = self._batch_end(retval, i)
                 epoch_loss += loss
                 total += count
-                ipdb.set_trace()
             self._log_epoch_end_loss(total, epoch_loss, accuracy/len(self.train_loader))
-            self._validate_and_test()
+            self._validate_and_test(debug)
             total = 0.0
+            accuracy = 0.0
             self._epoch_end_save(epoch_loss, old_epoch_loss)
             old_epoch_loss = epoch_loss
             epoch_loss = 0.0
