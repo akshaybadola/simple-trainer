@@ -33,7 +33,7 @@ class ClassificationFunc:
         self.train = True
         self.returns = ["loss", "accuracy", "total"]
 
-    def __call__(self, batch, criterion, model, optimizer):
+    def __call__(self, batch, criterion, model, optimizer, **kwargs):
         inputs, labels = batch
         inputs, labels = model.to_(inputs), model.to_(labels)
         if self.train:

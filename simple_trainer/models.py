@@ -48,13 +48,15 @@ class TrainerParams(BaseModel):
     cuda: bool
     seed: int
     resume_checkpoint: Optional[Path]
-    resume_best: bool
+    resume_best: Optional[bool]
     resume: bool
     metrics: List[str]
     val_frequency: Optional[int] = 1
     log_frequency: Optional[int] = 5
     test_frequency: Optional[int] = 5
     max_epochs: Optional[int]
+    save_best_on: Optional[str]
+    save_best_by: Optional[str]
 
     _validate_gpus = validator("gpus", allow_reuse=True)(gpus_must_evaluate_to_list_of_int)
 

@@ -1,4 +1,11 @@
+import torch
 import numpy as np
+
+
+def initialize_seed(self):
+    seed = self.trainer_params.seed
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
 
 
 def pre_val_log(self):
@@ -34,6 +41,10 @@ def post_batch_log_running_loss(self, loop, batch_num):
         self._batch_running_loss = 0.0
 
 
+def post_epoch_reset_batch_vars(self):
+    self._batch_vars = {}
+
+
 def pre_eval_log(self, loop):
     verb = "Testing" if loop == "test" else "Validating"
     self.logger.info(f"{verb} the model")
@@ -54,14 +65,14 @@ def update_metrics(self, loop):
         total_value = np.multiply(self._batch_vars[loop][m], self._batch_vars[loop]['total'])
         avg_value = np.sum(total_value) / total
         self._metrics[loop][m].append(avg_value)
-        self.logger.info(f'Average {m} of the network on {total} data instances is: {avg_value}')
+        self.logger.info(f'Average {loop} {m} of the network on {total} data instances is: {avg_value}')
 
 
 def maybe_validate(self):
     self.logger.debug("Running maybe_validate")
     freq = self.trainer_params.val_frequency
     if self.epoch % freq == (freq - 1):
-        if self.val_loader is not None:
+        if self.dataloaders["val"] is not None:
             self.validate()
     else:
         self.logger.info("No val loader. Skipping")
@@ -71,7 +82,7 @@ def maybe_test(self):
     self.logger.debug("Running maybe_test")
     freq = self.trainer_params.test_frequency
     if self.epoch % freq == (freq - 1):
-        if self.test_loader is not None:
+        if self.dataloaders["test"] is not None:
             self.test(self.epoch)
     else:
         self.logger.info("No test loader. Skipping")

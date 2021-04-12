@@ -12,7 +12,9 @@ from .hooks import (pre_train_log, save_checkpoint,
                     pre_eval_log, post_epoch_log,
                     pre_batch_init_batch_vars,
                     post_batch_update_batch_vars,
+                    post_epoch_reset_batch_vars,
                     maybe_test, maybe_validate,
+                    initialize_seed,
                     update_metrics, save_best)
 
 
@@ -22,7 +24,7 @@ def increment_epoch(self):
 
 class Trainer:
     def __init__(self, name, trainer_params, optimizer, model, data,
-                 dataloaders, update_function, criterion):
+                 dataloaders, update_function, criterion, extra_opts):
         self.log_file, self.logger = gen_file_and_stream_logger("logs", name,
                                                                 name, "debug",
                                                                 "info", "debug")
@@ -59,6 +61,7 @@ class Trainer:
         else:
             self._resume_path = None
         self.run_hook("post_init_hook")
+        self.extra_opts = extra_opts
         self._try_resume()
 
     def _init_model(self):
@@ -68,6 +71,7 @@ class Trainer:
         else:
             self._gpus = [-1]
         if self._gpus != [-1]:
+            self._model = self._model.to(torch.device(f"cuda:{self._gpus[0]}"))
             if len(self._gpus) > 1:
                 self._model = torch.nn.DataParallel(self._model, self._gpus)
             self._model.to_ = lambda x: x.to(torch.device(f"cuda:{self._gpus[0]}"))
@@ -75,7 +79,7 @@ class Trainer:
             self._model.to_ = lambda x: x.to(torch.device("cpu"))
 
     def _init_hooks(self):
-        self._hooks = {"post_init_hook": [],
+        self._hooks = {"post_init_hook": [initialize_seed],
                        "pre_resume_hook": [],
                        "post_resume_hook": [],
                        "pre_save_hook": [],
@@ -88,10 +92,11 @@ class Trainer:
                        "post_training_hook": [update_metrics],
                        "pre_epoch_hook": [],
                        "post_epoch_hook": [post_epoch_log,
-                                           partial(update_metrics, "train"),
+                                           partial(update_metrics, loop="train"),
                                            maybe_validate, maybe_test,
                                            save_checkpoint, save_best,
-                                           increment_epoch]}
+                                           increment_epoch,
+                                           post_epoch_reset_batch_vars]}
         for hook in self._hooks:
             setattr(self, f"run_{hook}", partial(self.run_hook, hook))
 
@@ -107,7 +112,7 @@ class Trainer:
             for func in hook:
                 func(self, *args, **kwargs)
 
-    def add_hook(self, hook, func, position=0):
+    def add_hook(self, hook, func, position: Union[int, str] = 0):
         """Add function :code:`func` to hook with name `hook`.
 
         Args:
@@ -117,7 +122,13 @@ class Trainer:
         """
         if hook in self._hooks:
             self.logger.info(f"Adding function {func.__name__} to {hook} at {position}")
-            self._hooks[hook].insert(position, func)
+            if position == "first":
+                pos = 0
+            elif position == "last":
+                pos = len(hook)
+            else:
+                pos = position
+            self._hooks[hook].insert(pos, func)
 
     def remove_hook(self, hook, function_name):
         hook = self._hooks.get(hook, None)
@@ -153,6 +164,10 @@ class Trainer:
     @property
     def data(self):
         return self._data
+
+    @property
+    def dataloaders(self):
+        return self._dataloaders
 
     @data.setter
     def data(self, data):
@@ -249,17 +264,14 @@ class Trainer:
         torch.save({'model_state_dict': self.model.state_dict(),
                     'optimizer_state_dict': self.optimizer.state_dict(),
                     'metrics': self.metrics,
-                    'data_name': self.data.name,
+                    'data_name': self.data["name"],
                     'model_name': self.model.__class__.__name__,
                     'params': self.trainer_params.__dict__},
                    os.path.join(self._savedir, save_name))
         self.run_hook("post_save_hook")
 
     def _eval(self, val_test, debug=False):
-        if val_test == "val":
-            loader = self.val_loader
-        elif val_test == "test":
-            loader = self.test_loader
+        loader = self.dataloaders[val_test]
         self.run_hook_with_args("pre_eval_hook", val_test)
         for i, batch in enumerate(loader):
             self.eval_one_batch(val_test, i, batch)
@@ -275,19 +287,21 @@ class Trainer:
         self.run_hook_with_args("pre_batch_hook", val_or_test)
         self.update_function.train = False
         retval = self.update_function(batch=batch, criterion=self.criterion,
-                                      model=self.model, optimizer=self.optimizer)
+                                      model=self.model, optimizer=self.optimizer,
+                                      trainer=self)
         self.run_hook_with_args("post_batch_hook", val_or_test, retval)
 
     def train_one_batch(self, i, batch):
         self.run_hook_with_args("pre_batch_hook", "train")
         self.update_function.train = True
         retval = self.update_function(batch=batch, criterion=self.criterion,
-                                      model=self.model, optimizer=self.optimizer)
+                                      model=self.model, optimizer=self.optimizer,
+                                      trainer=self)
         self.run_hook_with_args("post_batch_hook", "train", retval)
 
     def run_one_epoch(self):
         self.run_hook("pre_epoch_hook")
-        for i, batch in enumerate(self.train_loader):
+        for i, batch in enumerate(self.dataloaders["train"]):
             self.train_one_batch(i, batch)
         self.run_hook("post_epoch_hook")
 
