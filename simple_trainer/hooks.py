@@ -131,4 +131,6 @@ def save_best(self):
         return
     values = self._metrics[save_on][save_by]
     if self._save_best_predicate(values):
-        self._save(f"{self.save_best_name}_on_{save_on}_by_{save_by}")
+        with self.timer:
+            self._save(f"{self.save_best_name}_on_{save_on}_by_{save_by}")
+        self.logger.info(f"Time for save_best {self.timer.as_dict}")

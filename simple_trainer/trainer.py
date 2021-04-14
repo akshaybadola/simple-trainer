@@ -44,7 +44,7 @@ class Trainer:
         self._criterion = criterion
         self._optimizer = optimizer
         self._ddp_params = ddp_params
-        self.epoch = 0
+        self.epoch = 1
         self._init_model()
         self._init_metrics()
         self._init_hooks()
@@ -66,6 +66,8 @@ class Trainer:
                     self._resume_path = os.path.join(self._savedir, best_saves[0])
                 else:
                     self._resume_path = None
+        elif self.trainer_params.resume:
+            self._resume_path = os.path.join(self._savedir, self.checkpoint_name)
         else:
             self._resume_path = None
         self.run_hook("post_init_hook")
@@ -75,6 +77,7 @@ class Trainer:
     def _init_model(self):
         if not hasattr(self._model, "model_name"):
             raise AttributeError("Model must have attribute 'model_name'")
+        model_name = self._model.model_name
         self._has_cuda = self.trainer_params.cuda and torch.cuda.is_available()
         if self._has_cuda:
             self._gpus = self.trainer_params.gpus
@@ -84,10 +87,12 @@ class Trainer:
             self._model = self._model.to(torch.device(f"cuda:{self._gpus[0]}"))
             if len(self._gpus) > 1:
                 self._model = torch.nn.DataParallel(self._model, self._gpus)
+                self._model.model_name = model_name
             self._model.to_ = lambda x: x.to(torch.device(f"cuda:{self._gpus[0]}"))
         elif self.ddp_params and self._ddp_gpu:
             self._model = torch.nn.parallel.DistributedDataParallel(
                 self._model, device_ids=[self._ddp_gpu])
+            self._model.model_name = model_name
             self._model.to_ = lambda x: x.to(torch.device(f"cuda:{self._ddp_gpu}"))
         else:
             self._model.to_ = lambda x: x.to(torch.device("cpu"))
@@ -184,12 +189,12 @@ class Trainer:
     @property
     def checkpoint_name(self) -> str:
         return "_".join([self._checkpoint_name, self._name,
-                         self._model.model_name, self.data["name"]])
+                         self._model.model_name, self.data["name"]]).replace(" ", "_")
 
     @property
     def save_best_name(self) -> str:
         return "_".join([self._save_best_name, self._name,
-                         self._model.model_name, self.data["name"]])
+                         self._model.model_name, self.data["name"]]).replace(" ", "_")
 
     @property
     def model(self) -> torch.nn.Module:
@@ -286,17 +291,21 @@ class Trainer:
         if not self._resume_path:
             self.logger.debug("Not resuming")
             return
+        if not self._resume_path.endswith(".pth"):
+            self._resume_path += ".pth"
         self.logger.info(f"Resuming from {self._resume_path}")
         saved_state = torch.load(self._resume_path, map_location="cpu")
         for x in ['model_state_dict', 'optimizer_state_dict', 'metrics', 'data_name',
-                  'model_name', 'params']:
+                  'epoch', 'model_name', 'params']:
             if x not in saved_state:
                 raise AttributeError(f"Key {x} not in saved state")
-        if saved_state['model'] != self.model.__class__.__name__:
+        if saved_state['model_name'] != self.model.model_name:
             raise AttributeError("Error. Trying to load from a different model")
-        if saved_state["data_name"] != self.data.name:
+        if saved_state["data_name"] != self.data["name"]:
             raise AttributeError("Error. Trying to load a different dataset")
-        self.model.load_state_dict(saved_state['model_state_dict'], map_location="cpu")
+        self.epoch = saved_state["epoch"]
+        self.logger.info(f"Resuming from checkpoint at epoch {self.epoch}")
+        self.model.load_state_dict(saved_state['model_state_dict'])
         self.optimizer.load_state_dict(saved_state['optimizer_state_dict'])
         self._metrics = saved_state["metrics"]
         self.trainer_params = saved_state["params"]
@@ -308,8 +317,9 @@ class Trainer:
         torch.save({'model_state_dict': self.model.state_dict(),
                     'optimizer_state_dict': self.optimizer.state_dict(),
                     'metrics': self.metrics,
+                    "epoch": self.epoch,
                     'data_name': self.data["name"],
-                    'model_name': self.model.__class__.__name__,
+                    'model_name': self._model.model_name,
                     'params': self.trainer_params.__dict__},
                    os.path.join(self._savedir, save_name))
         self.run_hook("post_save_hook")
@@ -334,7 +344,7 @@ class Trainer:
             retval = self.update_function(batch=batch, criterion=self.criterion,
                                           model=self.model, optimizer=self.optimizer,
                                           trainer=self)
-        retval.update(self.timer.time)
+        retval.update(self.timer.as_dict)
         self.run_hook_with_args("post_batch_hook", val_or_test, retval)
 
     def train_one_batch(self, i, batch):
