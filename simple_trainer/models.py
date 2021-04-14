@@ -32,6 +32,9 @@ class TrainerParams(BaseModel):
         resume_best: Resume from the previously best state
         resume_checkpoint: Resume from given weights
         resume: Whether to resume or not.
+        metrics: A list of names of which values to track
+        val_frequency: How often to validate terms of `epoch`
+        log_frequency: How often to log terms of `epoch`
         test_frequency: How often in terms of `epoch` to run the test loop
         max_epochs: Maximum epochs to train
 

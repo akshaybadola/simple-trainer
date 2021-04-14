@@ -4,8 +4,6 @@ import torch
 import inspect
 from functools import partial
 
-from flask import Flask, request, Response
-
 from .helpers import gen_file_and_stream_logger
 from .models import TrainerParams
 from .hooks import (pre_train_log, save_checkpoint,
@@ -126,8 +124,10 @@ class Trainer:
                 pos = 0
             elif position == "last":
                 pos = len(hook)
-            else:
+            elif isinstance(position, int):
                 pos = position
+            else:
+                raise ValueError(f"Unknown Value for position {position}")
             self._hooks[hook].insert(pos, func)
 
     def remove_hook(self, hook, function_name):
@@ -165,10 +165,6 @@ class Trainer:
     def data(self):
         return self._data
 
-    @property
-    def dataloaders(self):
-        return self._dataloaders
-
     @data.setter
     def data(self, data):
         if "name" not in data:
@@ -188,6 +184,10 @@ class Trainer:
                         self.logger.error("Dataset must have length")
                         return
         self._data = data
+
+    @property
+    def dataloaders(self):
+        return self._dataloaders
 
     @property
     def optimizer(self):
