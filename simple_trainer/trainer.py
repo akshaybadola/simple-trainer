@@ -1,18 +1,24 @@
 from typing import Union, List, Optional, Any, Callable, Iterable, Dict
 import os
 import torch
+import torch.multiprocessing as mp
+from torch.utils.data.distributed import DistributedSampler
+import torch.distributed as distributed
 import inspect
 from functools import partial
+from contextlib import ExitStack
+
+from flask import Flask, request, Response
 
 from .helpers import gen_file_and_stream_logger
-from .models import TrainerParams
+from .models import TrainerParams, DDPParams
 from .hooks import (pre_train_log, save_checkpoint,
                     pre_eval_log, post_epoch_log,
                     pre_batch_init_batch_vars,
                     post_batch_update_batch_vars,
                     post_epoch_reset_batch_vars,
                     maybe_test, maybe_validate,
-                    initialize_seed,
+                    initialize_seed, Timer,
                     update_metrics, save_best)
 
 
@@ -21,8 +27,11 @@ def increment_epoch(self):
 
 
 class Trainer:
-    def __init__(self, name, trainer_params, optimizer, model, data,
-                 dataloaders, update_function, criterion, extra_opts):
+    def __init__(self, name, trainer_params: Dict[str, Any],
+                 optimizer, model, data: Dict[str, Any], dataloaders,
+                 update_function: Dict[str, Any],
+                 criterion, ddp_params: Optional[Dict[str, Any]] = {},
+                 extra_opts: Dict[str, Any] = {}):
         self.log_file, self.logger = gen_file_and_stream_logger("logs", name,
                                                                 name, "debug",
                                                                 "info", "debug")
@@ -34,6 +43,7 @@ class Trainer:
         self.trainer_params = trainer_params
         self._criterion = criterion
         self._optimizer = optimizer
+        self._ddp_params = ddp_params
         self.epoch = 0
         self._init_model()
         self._init_metrics()
@@ -63,6 +73,8 @@ class Trainer:
         self._try_resume()
 
     def _init_model(self):
+        if not hasattr(self._model, "model_name"):
+            raise AttributeError("Model must have attribute 'model_name'")
         self._has_cuda = self.trainer_params.cuda and torch.cuda.is_available()
         if self._has_cuda:
             self._gpus = self.trainer_params.gpus
@@ -73,6 +85,10 @@ class Trainer:
             if len(self._gpus) > 1:
                 self._model = torch.nn.DataParallel(self._model, self._gpus)
             self._model.to_ = lambda x: x.to(torch.device(f"cuda:{self._gpus[0]}"))
+        elif self.ddp_params and self._ddp_gpu:
+            self._model = torch.nn.parallel.DistributedDataParallel(
+                self._model, device_ids=[self._ddp_gpu])
+            self._model.to_ = lambda x: x.to(torch.device(f"cuda:{self._ddp_gpu}"))
         else:
             self._model.to_ = lambda x: x.to(torch.device("cpu"))
 
@@ -97,6 +113,16 @@ class Trainer:
                                            post_epoch_reset_batch_vars]}
         for hook in self._hooks:
             setattr(self, f"run_{hook}", partial(self.run_hook, hook))
+        self.timer = Timer()
+
+    def run_hook_with_contexts(self, hook, contexts, *args, **kwargs):
+        hook = self._hooks.get(hook, None)
+        if hook:
+            with ExitStack() as stack:
+                for con in contexts:
+                    stack.enter_context(con)
+                for func in hook:
+                    func(self, *args, **kwargs)
 
     def run_hook(self, hook):
         hook = self._hooks.get(hook, None)
@@ -154,16 +180,30 @@ class Trainer:
             return None
 
     @property
-    def name(self):
+    def name(self) -> str:
         return self._name
 
     @property
-    def model(self):
+    def checkpoint_name(self) -> str:
+        return "_".join([self._checkpoint_name, self._name,
+                         self._model.model_name, self.data["name"]])
+
+    @property
+    def save_best_name(self) -> str:
+        return "_".join([self._save_best_name, self._name,
+                         self._model.model_name, self.data["name"]])
+
+    @property
+    def model(self) -> torch.nn.Module:
         return self._model
 
     @property
-    def data(self):
+    def data(self) -> Dict[str, Union[str, torch.utils.data.Dataset]]:
         return self._data
+
+    @property
+    def dataloaders(self) -> Dict[str, torch.utils.data.DataLoader]:
+        return self._dataloaders
 
     @data.setter
     def data(self, data):
@@ -186,8 +226,12 @@ class Trainer:
         self._data = data
 
     @property
-    def dataloaders(self):
-        return self._dataloaders
+    def ddp_params(self):
+        return self._ddp_params
+
+    @ddp_params.setter
+    def ddp_params(self, x):
+        self._ddp_params = DDPParams(**x)
 
     @property
     def optimizer(self):
@@ -234,8 +278,10 @@ class Trainer:
         return self._metrics
 
     def _init_metrics(self):
-        self._metrics = {x: {m: [] for m in self.trainer_params.metrics}
-                         for x in ["train", "val", "test"]}
+        self._metrics = {}
+        for x in ["train", "val", "test"]:
+            self._metrics[x] = {m: [] for m in self.trainer_params.metrics}
+            self._metrics[x]["time"] = []
 
     def _try_resume(self):
         self.run_hook("pre_resume_hook")
@@ -286,17 +332,21 @@ class Trainer:
     def eval_one_batch(self, val_or_test, i, batch):
         self.run_hook_with_args("pre_batch_hook", val_or_test)
         self.update_function.train = False
-        retval = self.update_function(batch=batch, criterion=self.criterion,
-                                      model=self.model, optimizer=self.optimizer,
-                                      trainer=self)
+        with self.timer:
+            retval = self.update_function(batch=batch, criterion=self.criterion,
+                                          model=self.model, optimizer=self.optimizer,
+                                          trainer=self)
+        retval.update(self.timer.time)
         self.run_hook_with_args("post_batch_hook", val_or_test, retval)
 
     def train_one_batch(self, i, batch):
         self.run_hook_with_args("pre_batch_hook", "train")
         self.update_function.train = True
-        retval = self.update_function(batch=batch, criterion=self.criterion,
-                                      model=self.model, optimizer=self.optimizer,
-                                      trainer=self)
+        with self.timer:
+            retval = self.update_function(batch=batch, criterion=self.criterion,
+                                          model=self.model, optimizer=self.optimizer,
+                                          trainer=self)
+        retval.update(self.timer.as_dict)
         self.run_hook_with_args("post_batch_hook", "train", retval)
 
     def run_one_epoch(self):
@@ -305,9 +355,28 @@ class Trainer:
             self.train_one_batch(i, batch)
         self.run_hook("post_epoch_hook")
 
+    def train_ddp(self, gpu):
+        rank = self.ddp_params.node_rank * self.ddp_params.num_gpus + gpu
+        self._ddp_gpu = gpu
+        for k, v in self.dataloaders.items():
+            if v is not None:
+                sampler = DistributedSampler(self.data[k],
+                                             num_replicas=self.ddp_params.world_size,
+                                             rank=rank)
+                self.dataloaders[k].sampler = sampler
+        distributed.init_process_group(backend='nccl',
+                                       init_method=self.ddp_params.init_method,
+                                       world_size=self.ddp_params.world_size,
+                                       rank=rank)
+
     def train(self):
         self.run_hook("pre_training_hook")
-        while self.epoch < self.trainer_params.max_epochs:
-            self.run_one_epoch()
+        if self.ddp_params:
+            self.logger.info("Will train in a distributed manner")
+            self.logger.info(f"Spawning {self.ddp_params.num_gpus} processes")
+            mp.spawn(self.train, nprocs=self.ddp_params.num_gpus)
+        else:
+            while self.epoch < self.trainer_params.max_epochs:
+                self.run_one_epoch()
         self.run_hook("post_training_hook")
         self.logger.info('Finished training')

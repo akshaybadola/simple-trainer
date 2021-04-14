@@ -1,5 +1,20 @@
 import torch
 import numpy as np
+import time
+
+
+class Timer:
+    import time
+
+    def __enter__(self):
+        self._start = time.time()
+
+    def __exit__(self, *args):
+        self._time = time.time() - self._start
+
+    @property
+    def as_dict(self):
+        return {"time": self._time}
 
 
 def initialize_seed(self):
@@ -83,7 +98,7 @@ def maybe_test(self):
     freq = self.trainer_params.test_frequency
     if self.epoch % freq == (freq - 1):
         if self.dataloaders["test"] is not None:
-            self.test(self.epoch)
+            self.test()
     else:
         self.logger.info("No test loader. Skipping")
 
@@ -103,8 +118,8 @@ def maybe_anneal_lr(self):
 
 
 def save_checkpoint(self):
-    self.logger.info("Saving checkpoint")
-    self._save(self._checkpoint_name)
+    self.logger.info(f"Saving to {self.checkpoint_name}")
+    self._save(self.checkpoint_name)
 
 
 def save_best(self):
@@ -116,4 +131,4 @@ def save_best(self):
         return
     values = self._metrics[save_on][save_by]
     if self._save_best_predicate(values):
-        self._save(f"{self._save_best_name}_on_{save_on}_by_{save_by}")
+        self._save(f"{self.save_best_name}_on_{save_on}_by_{save_by}")
