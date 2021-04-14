@@ -1,6 +1,7 @@
 from typing import Union, List, Optional, Any, Callable, Iterable, Dict
 from pathlib import Path
 from pydantic import BaseModel, validator
+from torch.utils.data.distributed import DistributedSampler
 
 
 def gpus_must_evaluate_to_list_of_int(v: Union[List[int], int, str, None]) ->\
@@ -20,6 +21,19 @@ def gpus_must_evaluate_to_list_of_int(v: Union[List[int], int, str, None]) ->\
             return []
     else:
         return v
+
+
+class DDPParams(BaseModel):
+    backend: str
+    init_method: str
+    world_size: int
+    num_gpus: int
+    node_rank: int
+    sampler: DistributedSampler
+
+    class Config:
+        arbitrary_types_allowed = True
+        validate_assignment = True
 
 
 class TrainerParams(BaseModel):
@@ -57,6 +71,10 @@ class TrainerParams(BaseModel):
     max_epochs: Optional[int]
     save_best_on: Optional[str]
     save_best_by: Optional[str]
+
+    class Config:
+        arbitrary_types_allowed = True
+        validate_assignment = True
 
     _validate_gpus = validator("gpus", allow_reuse=True)(gpus_must_evaluate_to_list_of_int)
 
