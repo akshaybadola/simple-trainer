@@ -155,8 +155,10 @@ class Trainer:
                 pos = 0
             elif position == "last":
                 pos = len(hook)
-            else:
+            elif isinstance(position, int):
                 pos = position
+            else:
+                raise ValueError(f"Unknown Value for position {position}")
             self._hooks[hook].insert(pos, func)
 
     def remove_hook(self, hook, function_name):
