@@ -4,8 +4,6 @@ import time
 
 
 class Timer:
-    import time
-
     def __enter__(self):
         self._start = time.time()
 
@@ -28,7 +26,6 @@ def pre_val_log(self):
 
 
 def pre_batch_init_batch_vars(self, loop):
-    self.logger.debug("Running init_batch_vars")
     # loop in ["train", "val", "test"]
     self._batch_running_loss = 0.0
     if not hasattr(self, "_batch_vars"):
@@ -38,7 +35,6 @@ def pre_batch_init_batch_vars(self, loop):
 
 
 def post_batch_update_batch_vars(self, loop, retval):
-    self.logger.debug("Running update_batch_vars")
     for k, v in retval.items():
         if k not in self._batch_vars[loop]:
             self._batch_vars[loop][k] = []
@@ -46,7 +42,6 @@ def post_batch_update_batch_vars(self, loop, retval):
 
 
 def post_batch_log_running_loss(self, loop, batch_num):
-    self.logger.debug("Running log_running_loss")
     if batch_num % self.trainer_params.log_frequency ==\
        max(0, self.trainer_params.log_frequency - 1):
         self.logger.info('[%d, %5d] loss: %.3f. %f percent epoch done' %
@@ -77,10 +72,12 @@ def update_metrics(self, loop):
     self.logger.debug("Running update_metrics")
     for m in self._metrics[loop]:
         total = np.sum(self._batch_vars[loop]['total'])
-        total_value = np.multiply(self._batch_vars[loop][m], self._batch_vars[loop]['total'])
+        total_value = np.multiply(self._batch_vars[loop][m],
+                                  self._batch_vars[loop]['total'])
         avg_value = np.sum(total_value) / total
         self._metrics[loop][m].append(avg_value)
-        self.logger.info(f'Average {loop} {m} of the network on {total} data instances is: {avg_value}')
+        self.logger.info(f'Average {loop} {m} of the network on ' +
+                         f'{total} data instances is: {avg_value}')
 
 
 def maybe_validate(self):
