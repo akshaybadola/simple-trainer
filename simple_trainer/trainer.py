@@ -298,7 +298,7 @@ class Trainer:
         self.logger.info(f"Resuming from {self._resume_path}")
         saved_state = torch.load(self._resume_path, map_location="cpu")
         for x in ['model_state_dict', 'optimizer_state_dict', 'metrics', 'data_name',
-                  'epoch', 'model_name', 'params']:
+                  'epoch', 'model_name', 'params', 'extra_opts']:
             if x not in saved_state:
                 raise AttributeError(f"Key {x} not in saved state")
         if saved_state['model_name'] != self.model.model_name:
@@ -322,7 +322,8 @@ class Trainer:
                     "epoch": self.epoch,
                     'data_name': self.data["name"],
                     'model_name': self._model.model_name,
-                    'params': self.trainer_params.__dict__},
+                    'params': self.trainer_params.__dict__,
+                    'extra_opts': self.extra_opts},
                    os.path.join(self._savedir, save_name))
         self.run_hook("post_save_hook")
 

@@ -50,6 +50,7 @@ class TrainerParams(BaseModel):
         val_frequency: How often to validate terms of `epoch`
         log_frequency: How often to log terms of `epoch`
         test_frequency: How often in terms of `epoch` to run the test loop
+        dump_frequency: How often in terms of `epoch` to dump the trainer state
         max_epochs: Maximum epochs to train
 
     The behaviour of resuming from a previous state depends on both :code:`resume` and
@@ -71,7 +72,8 @@ class TrainerParams(BaseModel):
     val_frequency: Optional[int] = 1
     log_frequency: Optional[int] = 5
     test_frequency: Optional[int] = 5
-    max_epochs: Optional[int]
+    dump_frequency: Optional[int] = 5
+    max_epochs: int
     save_best_on: Optional[str]
     save_best_by: Optional[str]
 

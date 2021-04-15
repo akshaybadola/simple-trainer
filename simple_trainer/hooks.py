@@ -80,7 +80,8 @@ def update_metrics(self, loop):
         total_value = np.multiply(self._batch_vars[loop][m], self._batch_vars[loop]['total'])
         avg_value = np.sum(total_value) / total
         self._metrics[loop][m].append(avg_value)
-        self.logger.info(f'Average {loop} {m} of the network on {total} data instances is: {avg_value}')
+        self.logger.info(f'Average {loop} {m} of the network on\
+ {total} data instances is: {avg_value}')
 
 
 def maybe_validate(self):
@@ -128,9 +129,17 @@ def save_best(self):
     save_by = self.trainer_params.save_best_by  # one of the metrics
     if not (save_on and save_by and save_on in self.dataloaders and
             save_by in self._metrics[save_on] and self.epoch > 1):
-        return
-    values = self._metrics[save_on][save_by]
-    if self._save_best_predicate(values):
-        with self.timer:
+        self.logger.debug("Not Running save_best")
+    else:
+        values = self._metrics[save_on][save_by]
+        if self._save_best_predicate(values):
             self._save(f"{self.save_best_name}_on_{save_on}_by_{save_by}")
-        self.logger.info(f"Time for save_best {self.timer.as_dict}")
+
+
+def dump_state(self):
+    freq = self.trainer_params.dump_frequency
+    if self.epoch % freq == (freq - 1):
+        self.logger.debug(f"Dumping state for epoch {self.epoch}")
+        dump_name = self.checkpoint_name.replace(self._checkpoint_name, "dump") +\
+            f"_epoch_{self.epoch:03}"
+        self._save(dump_name)
