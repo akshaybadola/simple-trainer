@@ -81,7 +81,8 @@ def gen_file_and_stream_logger(logdir: str, logger_name: str,
                                log_file_name: str,
                                file_loglevel: Optional[str] = None,
                                stream_loglevel: Optional[str] = None,
-                               logger_level: Optional[str] = None):
+                               logger_level: Optional[str] = None,
+                               one_file: Optional[bool] = False):
     logger = logging.getLogger(logger_name)
     formatter = logging.Formatter(datefmt='%Y/%m/%d %I:%M:%S %p', fmt='%(asctime)s %(message)s')
     if not os.path.exists(logdir):
@@ -89,7 +90,7 @@ def gen_file_and_stream_logger(logdir: str, logger_name: str,
     if not log_file_name.endswith('.log'):
         log_file_name += '.log'
     log_file = os.path.abspath(os.path.join(logdir, log_file_name))
-    if os.path.exists(log_file):
+    if os.path.exists(log_file) and not one_file:
         backup_num = get_backup_num(logdir, log_file_name)
         os.rename(log_file, log_file + '.' + str(backup_num))
     file_handler = logging.FileHandler(log_file)

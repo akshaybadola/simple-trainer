@@ -4,8 +4,6 @@ import time
 
 
 class Timer:
-    import time
-
     def __enter__(self):
         self._start = time.time()
 
@@ -28,7 +26,6 @@ def pre_val_log(self):
 
 
 def pre_batch_init_batch_vars(self, loop):
-    self.logger.debug("Running init_batch_vars")
     # loop in ["train", "val", "test"]
     self._batch_running_loss = 0.0
     if not hasattr(self, "_batch_vars"):
@@ -38,7 +35,6 @@ def pre_batch_init_batch_vars(self, loop):
 
 
 def post_batch_update_batch_vars(self, loop, retval):
-    self.logger.debug("Running update_batch_vars")
     for k, v in retval.items():
         if k not in self._batch_vars[loop]:
             self._batch_vars[loop][k] = []
@@ -46,7 +42,6 @@ def post_batch_update_batch_vars(self, loop, retval):
 
 
 def post_batch_log_running_loss(self, loop, batch_num):
-    self.logger.debug("Running log_running_loss")
     if batch_num % self.trainer_params.log_frequency ==\
        max(0, self.trainer_params.log_frequency - 1):
         self.logger.info('[%d, %5d] loss: %.3f. %f percent epoch done' %
@@ -77,11 +72,12 @@ def update_metrics(self, loop):
     self.logger.debug("Running update_metrics")
     for m in self._metrics[loop]:
         total = np.sum(self._batch_vars[loop]['total'])
-        total_value = np.multiply(self._batch_vars[loop][m], self._batch_vars[loop]['total'])
+        total_value = np.multiply(self._batch_vars[loop][m],
+                                  self._batch_vars[loop]['total'])
         avg_value = np.sum(total_value) / total
         self._metrics[loop][m].append(avg_value)
-        self.logger.info(f'Average {loop} {m} of the network on\
- {total} data instances is: {avg_value}')
+        self.logger.info(f'Average {loop} {m} of the network on ' +
+                         f'{total} data instances is: {avg_value}')
 
 
 def maybe_validate(self):
@@ -90,8 +86,8 @@ def maybe_validate(self):
     if self.epoch % freq == (freq - 1):
         if self.dataloaders["val"] is not None:
             self.validate()
-    else:
-        self.logger.info("No val loader. Skipping")
+        else:
+            self.logger.info("No val loader. Skipping")
 
 
 def maybe_test(self):
@@ -100,8 +96,8 @@ def maybe_test(self):
     if self.epoch % freq == (freq - 1):
         if self.dataloaders["test"] is not None:
             self.test()
-    else:
-        self.logger.info("No test loader. Skipping")
+        else:
+            self.logger.info("No test loader. Skipping")
 
 
 def maybe_anneal_lr(self):
@@ -124,7 +120,6 @@ def save_checkpoint(self):
 
 
 def save_best(self):
-    self.logger.debug("Running save_best")
     save_on = self.trainer_params.save_best_on  # one of the loops
     save_by = self.trainer_params.save_best_by  # one of the metrics
     if not (save_on and save_by and save_on in self.dataloaders and
@@ -133,13 +128,15 @@ def save_best(self):
     else:
         values = self._metrics[save_on][save_by]
         if self._save_best_predicate(values):
-            self._save(f"{self.save_best_name}_on_{save_on}_by_{save_by}")
+            save_name = f"{self.save_best_name}_on_{save_on}_by_{save_by}"
+            self.logger.debug(f"Saving Best to {save_name}")
+            self._save(save_name)
 
 
 def dump_state(self):
     freq = self.trainer_params.dump_frequency
     if self.epoch % freq == (freq - 1):
         self.logger.debug(f"Dumping state for epoch {self.epoch}")
-        dump_name = self.checkpoint_name.replace(self._checkpoint_name, "dump") +\
+        dump_name = self.checkpoint_name.replace(self._checkpoint_prefix, "dump") +\
             f"_epoch_{self.epoch:03}"
         self._save(dump_name)

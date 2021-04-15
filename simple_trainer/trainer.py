@@ -18,7 +18,7 @@ from .hooks import (pre_train_log, save_checkpoint,
                     post_batch_update_batch_vars,
                     post_epoch_reset_batch_vars,
                     maybe_test, maybe_validate,
-                    initialize_seed, Timer,
+                    initialize_seed, Timer, dump_state,
                     update_metrics, save_best)
 
 
@@ -51,8 +51,8 @@ class Trainer:
         self._savedir = "saves"
         if not os.path.exists(self._savedir):
             os.mkdir(self._savedir)
-        self._checkpoint_name = "checkpoint"
-        self._save_best_name = "best_save"
+        self._checkpoint_prefix = "checkpoint"
+        self._save_best_prefix = "best_save"
         if self.trainer_params.resume_checkpoint:
             self._resume_path = os.path.join(self._savedir, self.trainer_params.resume_checkpoint)
         elif self.trainer_params.resume_best:
@@ -61,7 +61,8 @@ class Trainer:
                 self.logger.debug(msg)
             else:
                 save_files = os.listdir(self._savedir)
-                best_saves = [save for save in save_files if save.startswith(self._save_best_name)]
+                best_saves = [save for save in save_files
+                              if save.startswith(self._save_best_prefix)]
                 if best_saves:
                     self._resume_path = os.path.join(self._savedir, best_saves[0])
                 else:
@@ -113,8 +114,8 @@ class Trainer:
                        "post_epoch_hook": [post_epoch_log,
                                            partial(update_metrics, loop="train"),
                                            maybe_validate, maybe_test,
+                                           increment_epoch, dump_state,
                                            save_checkpoint, save_best,
-                                           increment_epoch,
                                            post_epoch_reset_batch_vars]}
         for hook in self._hooks:
             setattr(self, f"run_{hook}", partial(self.run_hook, hook))
@@ -190,12 +191,12 @@ class Trainer:
 
     @property
     def checkpoint_name(self) -> str:
-        return "_".join([self._checkpoint_name, self._name,
+        return "_".join([self._checkpoint_prefix, self._name,
                          self._model.model_name, self.data["name"]]).replace(" ", "_")
 
     @property
     def save_best_name(self) -> str:
-        return "_".join([self._save_best_name, self._name,
+        return "_".join([self._save_best_prefix, self._name,
                          self._model.model_name, self.data["name"]]).replace(" ", "_")
 
     @property
@@ -290,11 +291,14 @@ class Trainer:
 
     def _try_resume(self):
         self.run_hook("pre_resume_hook")
+        if not self._resume_path.endswith(".pth"):
+            self._resume_path += ".pth"
         if not self._resume_path:
             self.logger.debug("Not resuming")
             return
-        if not self._resume_path.endswith(".pth"):
-            self._resume_path += ".pth"
+        if not os.path.exists(self._resume_path):
+            self.logger.info(f"Resume path {self._resume_path} doesn't exist")
+            return
         self.logger.info(f"Resuming from {self._resume_path}")
         saved_state = torch.load(self._resume_path, map_location="cpu")
         for x in ['model_state_dict', 'optimizer_state_dict', 'metrics', 'data_name',
