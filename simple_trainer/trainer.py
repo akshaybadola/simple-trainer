@@ -286,8 +286,8 @@ class Trainer:
     def _init_metrics(self):
         self._metrics = {}
         for x in ["train", "val", "test"]:
-            self._metrics[x] = {m: [] for m in self.trainer_params.metrics}
-            self._metrics[x]["time"] = []
+            self._metrics[x] = {m: {} for m in self.trainer_params.metrics}
+            self._metrics[x]["time"] = {}
 
     def _try_resume(self):
         self.run_hook("pre_resume_hook")
@@ -365,6 +365,7 @@ class Trainer:
         self.run_hook_with_args("post_batch_hook", "train", retval)
 
     def run_one_epoch(self):
+        self.logger.info(f"Training epoch {self.epoch}")
         self.run_hook("pre_epoch_hook")
         for i, batch in enumerate(self.dataloaders["train"]):
             self.train_one_batch(i, batch)

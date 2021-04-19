@@ -13,13 +13,13 @@ def call_with_contexts(func, contexts, *args, **kwargs):
         func(*args, **kwargs)
 
 
-def accuracy_topk(outputs, labels, k=1):
+def correct_topk(outputs, labels, k=1):
     _, indices = torch.topk(outputs, k, 1)
     equal = labels.repeat(k).reshape(-1, indices.shape[0]).T == indices
-    return torch.sum(equal, 1)
+    return torch.sum(equal).item()
 
 
-def accuracy(outputs, labels):
+def correct(outputs, labels):
     return accuracy_topk(outputs, labels)
 
 

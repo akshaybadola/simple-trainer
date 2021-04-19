@@ -72,12 +72,14 @@ def update_metrics(self, loop):
     self.logger.debug("Running update_metrics")
     for m in self._metrics[loop]:
         total = np.sum(self._batch_vars[loop]['total'])
-        total_value = np.multiply(self._batch_vars[loop][m],
-                                  self._batch_vars[loop]['total'])
-        avg_value = np.sum(total_value) / total
-        self._metrics[loop][m].append(avg_value)
+        total_value = np.sum(self._batch_vars[loop][m])
+        avg_value = total_value / total
+        self._metrics[loop][m][self.epoch]["total"] = total_value
+        self._metrics[loop][m][self.epoch]["avg"] = avg_value
         self.logger.info(f'Average {loop} {m} of the network on ' +
                          f'{total} data instances is: {avg_value}')
+        self.logger.info(f'Total {loop} {m} of the network on ' +
+                         f'{total} data instances is: {total_value}')
 
 
 def maybe_validate(self):
