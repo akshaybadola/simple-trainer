@@ -20,7 +20,7 @@ def correct_topk(outputs, labels, k=1):
 
 
 def correct(outputs, labels):
-    return accuracy_topk(outputs, labels)
+    return correct_topk(outputs, labels)
 
 
 def prec(output, target, topk=(1,)):

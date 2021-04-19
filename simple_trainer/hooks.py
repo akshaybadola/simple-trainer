@@ -74,8 +74,8 @@ def update_metrics(self, loop):
         total = np.sum(self._batch_vars[loop]['total'])
         total_value = np.sum(self._batch_vars[loop][m])
         avg_value = total_value / total
-        self._metrics[loop][m][self.epoch]["total"] = total_value
-        self._metrics[loop][m][self.epoch]["avg"] = avg_value
+        self._metrics[loop][m] = {self.epoch: {"total": total_value}}
+        self._metrics[loop][m][self.epoch]["average"] = avg_value
         self.logger.info(f'Average {loop} {m} of the network on ' +
                          f'{total} data instances is: {avg_value}')
         self.logger.info(f'Total {loop} {m} of the network on ' +
