@@ -31,7 +31,8 @@ class Trainer:
                  optimizer, model, data: Dict[str, Any], dataloaders,
                  update_function: Dict[str, Any],
                  criterion, ddp_params: Optional[Dict[str, Any]] = {},
-                 extra_opts: Dict[str, Any] = {}):
+                 extra_opts: Dict[str, Any] = {},
+                 post_init_hooks: List[Callable] = []):
         self.log_file, self.logger = gen_file_and_stream_logger("logs", name,
                                                                 name, "debug",
                                                                 "info", "debug")
@@ -71,9 +72,10 @@ class Trainer:
             self._resume_path = os.path.join(self._savedir, self.checkpoint_name)
         else:
             self._resume_path = None
-        self.run_hook("post_init_hook")
+        for func in post_init_hooks:
+            self.add_hook("post_init_hook", func, "last")
         self.extra_opts = extra_opts
-        self._try_resume()
+        self.run_hook("post_init_hook")
 
     def _init_model(self):
         if not hasattr(self._model, "model_name"):
@@ -207,10 +209,6 @@ class Trainer:
     def data(self) -> Dict[str, Union[str, torch.utils.data.Dataset]]:
         return self._data
 
-    @property
-    def dataloaders(self) -> Dict[str, torch.utils.data.DataLoader]:
-        return self._dataloaders
-
     @data.setter
     def data(self, data):
         if "name" not in data:
@@ -230,6 +228,10 @@ class Trainer:
                         self.logger.error("Dataset must have length")
                         return
         self._data = data
+
+    @property
+    def dataloaders(self) -> Dict[str, torch.utils.data.DataLoader]:
+        return self._dataloaders
 
     @property
     def ddp_params(self):
@@ -289,7 +291,7 @@ class Trainer:
             self._metrics[x] = {m: {} for m in self.trainer_params.metrics}
             self._metrics[x]["time"] = {}
 
-    def _try_resume(self):
+    def try_resume(self):
         self.run_hook("pre_resume_hook")
         if not self._resume_path.endswith(".pth"):
             self._resume_path += ".pth"
@@ -315,6 +317,7 @@ class Trainer:
         self.optimizer.load_state_dict(saved_state['optimizer_state_dict'])
         self._metrics = saved_state["metrics"]
         self.trainer_params = saved_state["params"]
+        self.extra_opts = saved_state["extra_opts"]
         self.run_hook("post_resume_hook")
 
     def _save(self, name):
@@ -397,3 +400,7 @@ class Trainer:
                 self.run_one_epoch()
         self.run_hook("post_training_hook")
         self.logger.info('Finished training')
+
+    def start(self):
+        self.try_resume()
+        self.train()

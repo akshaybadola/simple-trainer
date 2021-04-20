@@ -74,8 +74,10 @@ def update_metrics(self, loop):
         total = np.sum(self._batch_vars[loop]['total'])
         total_value = np.sum(self._batch_vars[loop][m])
         avg_value = total_value / total
-        self._metrics[loop][m] = {self.epoch: {"total": total_value}}
-        self._metrics[loop][m][self.epoch]["average"] = avg_value
+        if m not in self._metrics[loop]:
+            self._metrics[loop][m] = {}
+        self._metrics[loop][m][self.epoch] = {"total": total_value, "average": avg_value}
+        # self._metrics[loop][m][self.epoch]["average"] = avg_value
         self.logger.info(f'Average {loop} {m} of the network on ' +
                          f'{total} data instances is: {avg_value}')
         self.logger.info(f'Total {loop} {m} of the network on ' +
@@ -102,18 +104,18 @@ def maybe_test(self):
             self.logger.info("No test loader. Skipping")
 
 
-def maybe_anneal_lr(self):
-    self.logger.debug("Running maybe_anneal_lr")
-    old_loss = self._metrics["train"]["loss"][-2]
-    cur_loss = self._metrics["train"]["loss"][-1]
-    anneal_epoch_after = getattr(self, "anneal_epoch_after", 20)
-    anneal_loss_diff = getattr(self, "anneal_loss_diff", 0.01)
-    anneal_multiplier = getattr(self, "anneal_multiplier", 0.9)
-    if self.epoch > anneal_epoch_after and\
-       (old_loss - cur_loss < (anneal_loss_diff * old_loss)):
+def maybe_anneal_lr(self, on="loss", after_epoch=20, loss_diff=0.01, multiplier=0.9):
+    if self.epoch < after_epoch:
+        return
+    self.logger.debug(f"Running maybe_anneal_lr after epoch {self.epoch}")
+    values = [(k, v["total"]) for k, v in self._metrics["train"][on].items()]
+    values.sort(key=lambda x: x[0])
+    old_val = values[-2]
+    cur_val = values[-1]
+    if old_val - cur_val < (loss_diff * old_val):
         for param_group in self.optimizer.param_groups:
-            param_group['lr'] *= anneal_multiplier
-        self.logger.info("Annealing running rate to {param_group['lr']}")
+            param_group['lr'] *= multiplier
+        self.logger.info(f"Annealing running rate by {multiplier}")
 
 
 def save_checkpoint(self):
