@@ -110,8 +110,8 @@ def maybe_anneal_lr(self, on="loss", after_epoch=20, loss_diff=0.01, multiplier=
     self.logger.debug(f"Running maybe_anneal_lr after epoch {self.epoch}")
     values = [(k, v["total"]) for k, v in self._metrics["train"][on].items()]
     values.sort(key=lambda x: x[0])
-    old_val = values[-2]
-    cur_val = values[-1]
+    old_val = values[-2][1]
+    cur_val = values[-1][1]
     if old_val - cur_val < (loss_diff * old_val):
         for param_group in self.optimizer.param_groups:
             param_group['lr'] *= multiplier
