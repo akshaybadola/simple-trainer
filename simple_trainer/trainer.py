@@ -111,7 +111,7 @@ class Trainer:
                        "pre_batch_hook": [pre_batch_init_batch_vars],
                        "post_batch_hook": [post_batch_update_batch_vars],
                        "pre_training_hook": [pre_train_log],
-                       "post_training_hook": [update_metrics],
+                       "post_training_hook": [],
                        "pre_epoch_hook": [],
                        "post_epoch_hook": [post_epoch_log,
                                            partial(update_metrics, loop="train"),
@@ -369,7 +369,7 @@ class Trainer:
         self.run_hook_with_args("post_batch_hook", "train", retval)
 
     def run_one_epoch(self):
-        self.logger.info(f"Training epoch {self.epoch}")
+        self.logger.info(f"Training epoch {self.epoch+1}")
         self.run_hook("pre_epoch_hook")
         for i, batch in enumerate(self.dataloaders["train"]):
             self.train_one_batch(i, batch)
