@@ -45,7 +45,7 @@ class Trainer:
         self._criterion = criterion
         self._optimizer = optimizer
         self._ddp_params = ddp_params
-        self.epoch = 1
+        self.epoch = 0
         self._init_model()
         self._init_metrics()
         self._init_hooks()
@@ -163,6 +163,42 @@ class Trainer:
             else:
                 raise ValueError(f"Unknown Value for position {position}")
             self._hooks[hook].insert(pos, func)
+
+    def add_hook_before(self, hook: List[Callable], func: Callable, before_func: str):
+        """Add function :code:`func` to hook with name `hook`.
+
+        Args:
+            hook: Name of the hook
+            func: A function with a single argument, which is the trainer instance
+            position: Where to insert the hook. Defaults to front of list.
+        """
+        if hook in self._hooks:
+            self.logger.info(f"Adding function {func.__name__} to {hook} after {before_func}")
+            names = [x.func.__name__ if isinstance(x, partial) else x.__name__
+                     for x in self._hooks[hook]]
+            if before_func in names:
+                pos = names.index(before_func)
+                self._hooks[hook].insert(pos, func)
+            else:
+                raise ValueError(f"No such func {before_func}")
+
+    def add_hook_after(self, hook: List[Callable], func: Callable, after_func: str):
+        """Add function :code:`func` to hook with name `hook`.
+
+        Args:
+            hook: Name of the hook
+            func: A function with a single argument, which is the trainer instance
+            position: Where to insert the hook. Defaults to front of list.
+        """
+        if hook in self._hooks:
+            self.logger.info(f"Adding function {func.__name__} to {hook} after {after_func}")
+            names = [x.func.__name__ if isinstance(x, partial) else x.__name__
+                     for x in self._hooks[hook]]
+            if after_func in names:
+                pos = names.index(after_func) + 1
+                self._hooks[hook].insert(pos, func)
+            else:
+                raise ValueError(f"No such func {after_func}")
 
     def remove_hook(self, hook, function_name):
         hook = self._hooks.get(hook, None)
@@ -293,6 +329,7 @@ class Trainer:
 
     def try_resume(self):
         self.run_hook("pre_resume_hook")
+        self.logger.debug(f"Trying to resume from {self._resume_path}")
         if not self._resume_path.endswith(".pth"):
             self._resume_path += ".pth"
         if not self._resume_path:
@@ -313,7 +350,10 @@ class Trainer:
             raise AttributeError("Error. Trying to load a different dataset")
         self.epoch = saved_state["epoch"]
         self.logger.info(f"Resuming from checkpoint at epoch {self.epoch}")
-        self.model.load_state_dict(saved_state['model_state_dict'])
+        if isinstance(self.model, torch.nn.parallel.DataParallel):
+            self.model.module.load_state_dict(saved_state['model_state_dict'])
+        else:
+            self.model.load_state_dict(saved_state['model_state_dict'])
         self.optimizer.load_state_dict(saved_state['optimizer_state_dict'])
         self._metrics = saved_state["metrics"]
         self.trainer_params = saved_state["params"]
@@ -323,7 +363,11 @@ class Trainer:
     def _save(self, name):
         self.run_hook("pre_save_hook")
         save_name = name if name.endswith(".pth") else name + ".pth"
-        torch.save({'model_state_dict': self.model.state_dict(),
+        if isinstance(self.model, torch.nn.parallel.DataParallel):
+            state_dict = self.model.module.state_dict()
+        else:
+            state_dict = self.model.state_dict()
+        torch.save({'model_state_dict': state_dict,
                     'optimizer_state_dict': self.optimizer.state_dict(),
                     'metrics': self.metrics,
                     "epoch": self.epoch,
