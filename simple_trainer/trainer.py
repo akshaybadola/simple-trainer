@@ -1,4 +1,4 @@
-from typing import Union, List, Optional, Any, Callable, Iterable, Dict
+from typing import Union, List, Optional, Any, Callable, Iterable, Dict, cast
 import os
 import torch
 import torch.multiprocessing as mp
@@ -6,74 +6,87 @@ from torch.utils.data.distributed import DistributedSampler
 import torch.distributed as distributed
 import inspect
 from functools import partial
-from contextlib import ExitStack
+from pathlib import Path
 
-from flask import Flask, request, Response
+from common_pyutil.decorators import Tag
+from common_pyutil.contexts import Timer
+from common_pyutil.log import get_file_and_stream_logger
 
-from .helpers import gen_file_and_stream_logger
-from .models import TrainerParams, DDPParams
-from .hooks import (pre_train_log, save_checkpoint,
-                    pre_eval_log, post_epoch_log,
-                    pre_batch_init_batch_vars,
-                    post_batch_update_batch_vars,
-                    post_epoch_reset_batch_vars,
-                    maybe_test, maybe_validate,
-                    initialize_seed, Timer, dump_state,
-                    update_metrics, save_best)
+from .pipeline import Hooks
+
+from .models import TrainerParams, DDPParams, UpdateFunction
+from .hook_functions import (pre_train_log, save_checkpoint,
+                             pre_eval_log, post_epoch_log,
+                             pre_batch_init_batch_vars,
+                             post_batch_update_batch_vars,
+                             post_epoch_reset_batch_vars,
+                             maybe_test, maybe_validate,
+                             initialize_seed, dump_state,
+                             update_metrics, save_best)
 
 
 def increment_epoch(self):
-    self.epoch += 1
+    self._epoch += 1
 
 
-class Trainer:
+cmd = Tag("cmd")
+
+
+class Trainer(Hooks):
     def __init__(self, name, trainer_params: Dict[str, Any],
                  optimizer, model, data: Dict[str, Any], dataloaders,
-                 update_function: Dict[str, Any],
+                 update_function: Dict[str, UpdateFunction],
                  criterion, ddp_params: Optional[Dict[str, Any]] = {},
                  extra_opts: Dict[str, Any] = {},
                  post_init_hooks: List[Callable] = []):
-        self.log_file, self.logger = gen_file_and_stream_logger("logs", name,
+        self.log_file, self.logger = get_file_and_stream_logger("logs", name,
                                                                 name, "debug",
-                                                                "info", "debug")
+                                                                "info", "debug",
+                                                                new_file=True)
         self._name = name
         self.data = data
         self._dataloaders = dataloaders
         self.update_function = update_function
         self._model = model
-        self.trainer_params = trainer_params
+        self._trainer_params = TrainerParams(**trainer_params)
         self._criterion = criterion
         self._optimizer = optimizer
-        self._ddp_params = ddp_params
-        self.epoch = 0
+        if ddp_params:
+            self._ddp_params: Optional[DDPParams] = DDPParams(**ddp_params)
+        else:
+            self._ddp_params = None
+        self._epoch = 0
         self._init_model()
         self._init_metrics()
         self._init_hooks()
-        self._savedir = "saves"
-        if not os.path.exists(self._savedir):
-            os.mkdir(self._savedir)
+        self.timer = Timer()
+        self._savedir = Path("saves")
+        if not self.savedir.exists():
+            os.mkdir(self.savedir)
         self._checkpoint_prefix = "checkpoint"
         self._save_best_prefix = "best_save"
         if self.trainer_params.resume_checkpoint:
-            self._resume_path = os.path.join(self._savedir, self.trainer_params.resume_checkpoint)
+            self._resume_path: Optional[Path] = self.savedir.joinpath(
+                self.trainer_params.resume_checkpoint)
         elif self.trainer_params.resume_best:
-            if not (os.path.exists(os.path.join(self._savedir)) and os.listdir(self._savedir)):
+            if not bool([*self.savedir.iterdir()]):
                 msg = f"No saves in savedir yet"
                 self.logger.debug(msg)
             else:
-                save_files = os.listdir(self._savedir)
+                save_files = [*self.savedir.iterdir()]
                 best_saves = [save for save in save_files
-                              if save.startswith(self._save_best_prefix)]
+                              if save.name.startswith(self._save_best_prefix)]
                 if best_saves:
-                    self._resume_path = os.path.join(self._savedir, best_saves[0])
+                    self._resume_path = self.savedir.joinpath(best_saves[0])
                 else:
                     self._resume_path = None
         elif self.trainer_params.resume:
-            self._resume_path = os.path.join(self._savedir, self.checkpoint_name)
+            self._resume_path = self.savedir.joinpath(self.checkpoint_name)
         else:
             self._resume_path = None
         for func in post_init_hooks:
             self.add_hook("post_init_hook", func, "last")
+        self._batch_vars: Dict[str, Any] = {}
         self.extra_opts = extra_opts
         self.run_hook("post_init_hook")
 
@@ -101,6 +114,8 @@ class Trainer:
             self._model.to_ = lambda x: x.to(torch.device("cpu"))
 
     def _init_hooks(self):
+        """Initialize all hooks."""
+        super().__init__(self.logger)
         self._hooks = {"post_init_hook": [initialize_seed],
                        "pre_resume_hook": [],
                        "post_resume_hook": [],
@@ -121,107 +136,12 @@ class Trainer:
                                            post_epoch_reset_batch_vars]}
         for hook in self._hooks:
             setattr(self, f"run_{hook}", partial(self.run_hook, hook))
-        self.timer = Timer()
-
-    def run_hook_with_contexts(self, hook, contexts, *args, **kwargs):
-        hook = self._hooks.get(hook, None)
-        if hook:
-            with ExitStack() as stack:
-                for con in contexts:
-                    stack.enter_context(con)
-                for func in hook:
-                    func(self, *args, **kwargs)
-
-    def run_hook(self, hook):
-        hook = self._hooks.get(hook, None)
-        if hook:
-            for func in hook:
-                func(self)
-
-    def run_hook_with_args(self, hook, *args, **kwargs):
-        hook = self._hooks.get(hook, None)
-        if hook:
-            for func in hook:
-                func(self, *args, **kwargs)
-
-    def add_hook(self, hook, func, position: Union[int, str] = 0):
-        """Add function :code:`func` to hook with name `hook`.
-
-        Args:
-            hook: Name of the hook
-            func: A function with a single argument, which is the trainer instance
-            position: Where to insert the hook. Defaults to front of list.
-        """
-        if hook in self._hooks:
-            self.logger.info(f"Adding function {func.__name__} to {hook} at {position}")
-            if position == "first":
-                pos = 0
-            elif position == "last":
-                pos = len(hook)
-            elif isinstance(position, int):
-                pos = position
-            else:
-                raise ValueError(f"Unknown Value for position {position}")
-            self._hooks[hook].insert(pos, func)
-
-    def add_hook_before(self, hook: List[Callable], func: Callable, before_func: str):
-        """Add function :code:`func` to hook with name `hook`.
-
-        Args:
-            hook: Name of the hook
-            func: A function with a single argument, which is the trainer instance
-            position: Where to insert the hook. Defaults to front of list.
-        """
-        if hook in self._hooks:
-            self.logger.info(f"Adding function {func.__name__} to {hook} after {before_func}")
-            names = [x.func.__name__ if isinstance(x, partial) else x.__name__
-                     for x in self._hooks[hook]]
-            if before_func in names:
-                pos = names.index(before_func)
-                self._hooks[hook].insert(pos, func)
-            else:
-                raise ValueError(f"No such func {before_func}")
-
-    def add_hook_after(self, hook: List[Callable], func: Callable, after_func: str):
-        """Add function :code:`func` to hook with name `hook`.
-
-        Args:
-            hook: Name of the hook
-            func: A function with a single argument, which is the trainer instance
-            position: Where to insert the hook. Defaults to front of list.
-        """
-        if hook in self._hooks:
-            self.logger.info(f"Adding function {func.__name__} to {hook} after {after_func}")
-            names = [x.func.__name__ if isinstance(x, partial) else x.__name__
-                     for x in self._hooks[hook]]
-            if after_func in names:
-                pos = names.index(after_func) + 1
-                self._hooks[hook].insert(pos, func)
-            else:
-                raise ValueError(f"No such func {after_func}")
-
-    def remove_hook(self, hook, function_name):
-        hook = self._hooks.get(hook, None)
-        if hook:
-            self._hooks[hook] = [*filter(lambda x: x.__name__ == function_name, hook)]
-
-    def remove_hook_at(self, hook, position):
-        hook = self._hooks.get(hook, None)
-        if hook:
-            hook.pop(position)
-
-    @property
-    def hooks(self):
-        return self._hooks
-
-    def describe_hook(self, hook):
-        hook = self._hooks.get(hook, None)
-        if hook:
-            return [f"partial({x.func.__name__}, {x.args}, {x.keywords})"
-                    if isinstance(x, partial) else x.__name__
-                    for x in hook]
-        else:
-            return None
+        cmd.add(self.add_hook)
+        cmd.add(self.add_hook_before)
+        cmd.add(self.add_hook_after)
+        cmd.add(self.remove_hook)
+        cmd.add(self.remove_hook_at)
+        cmd.add(self.describe_hook)
 
     @property
     def name(self) -> str:
@@ -230,12 +150,12 @@ class Trainer:
     @property
     def checkpoint_name(self) -> str:
         return "_".join([self._checkpoint_prefix, self._name,
-                         self._model.model_name, self.data["name"]]).replace(" ", "_")
+                         self._model.model_name, self.data["name"]]).replace(" ", "_")  # type: ignore
 
     @property
     def save_best_name(self) -> str:
         return "_".join([self._save_best_prefix, self._name,
-                         self._model.model_name, self.data["name"]]).replace(" ", "_")
+                         self._model.model_name, self.data["name"]]).replace(" ", "_")  # type: ignore
 
     @property
     def model(self) -> torch.nn.Module:
@@ -270,7 +190,7 @@ class Trainer:
         return self._dataloaders
 
     @property
-    def ddp_params(self):
+    def ddp_params(self) -> Optional[DDPParams]:
         return self._ddp_params
 
     @ddp_params.setter
@@ -287,6 +207,8 @@ class Trainer:
 
     @update_function.setter
     def update_function(self, func):
+        if not isinstance(func, UpdateFunction):
+            self.logger.error(f"{func} must be an instance of {UpdateFunction}")
         if not callable(func):
             self.logger.error(f"Not Callable {func}")
         elif not hasattr(func, "train"):
@@ -306,11 +228,15 @@ class Trainer:
                 self._update_function = func
 
     @property
+    def savedir(self) -> Path:
+        return self._savedir
+
+    @property
     def criterion(self):
         return self._criterion
 
     @property
-    def trainer_params(self):
+    def trainer_params(self) -> TrainerParams:
         return self._trainer_params
 
     @trainer_params.setter
@@ -318,28 +244,41 @@ class Trainer:
         self._trainer_params = TrainerParams(**params)
 
     @property
-    def metrics(self):
+    def metrics(self) -> Dict[str, Dict[str, Dict]]:
         return self._metrics
 
+    @property
+    def batch_vars(self) -> Dict[str, Dict]:
+        return self._batch_vars
+
+    @property
+    def epoch(self) -> int:
+        return self._epoch
+
+    @property
+    def resume_path(self) -> Optional[Path]:
+        return self._resume_path
+
     def _init_metrics(self):
-        self._metrics = {}
+        self._metrics: Dict[str, Dict[str, Dict]] = {}
         for x in ["train", "val", "test"]:
             self._metrics[x] = {m: {} for m in self.trainer_params.metrics}
             self._metrics[x]["time"] = {}
 
     def try_resume(self):
         self.run_hook("pre_resume_hook")
-        self.logger.debug(f"Trying to resume from {self._resume_path}")
-        if not self._resume_path.endswith(".pth"):
-            self._resume_path += ".pth"
-        if not self._resume_path:
-            self.logger.debug("Not resuming")
+        if not self.resume_path:
+            self.logger.debug("Resume not given. Not resuming")
             return
-        if not os.path.exists(self._resume_path):
-            self.logger.info(f"Resume path {self._resume_path} doesn't exist")
+        resume_path = self.resume_path
+        self.logger.debug(f"Trying to resume from {resume_path}")
+        if not resume_path.suffix == ".pth":
+            resume_path = resume_path.with_suffix(".pth")
+        if not resume_path.exists():
+            self.logger.info(f"Resume path {resume_path} doesn't exist")
             return
-        self.logger.info(f"Resuming from {self._resume_path}")
-        saved_state = torch.load(self._resume_path, map_location="cpu")
+        self.logger.info(f"Resuming from {resume_path}")
+        saved_state = torch.load(str(resume_path), map_location="cpu")
         for x in ['model_state_dict', 'optimizer_state_dict', 'metrics', 'data_name',
                   'epoch', 'model_name', 'params', 'extra_opts']:
             if x not in saved_state:
@@ -348,8 +287,8 @@ class Trainer:
             raise AttributeError("Error. Trying to load from a different model")
         if saved_state["data_name"] != self.data["name"]:
             raise AttributeError("Error. Trying to load a different dataset")
-        self.epoch = saved_state["epoch"]
-        self.logger.info(f"Resuming from checkpoint at epoch {self.epoch}")
+        self._epoch = saved_state["epoch"]
+        self.logger.info(f"Resuming from checkpoint at _epoch {self.epoch}")
         if isinstance(self.model, torch.nn.parallel.DataParallel):
             self.model.module.load_state_dict(saved_state['model_state_dict'])
         else:
@@ -375,15 +314,15 @@ class Trainer:
                     'model_name': self._model.model_name,
                     'params': self.trainer_params.__dict__,
                     'extra_opts': self.extra_opts},
-                   os.path.join(self._savedir, save_name))
+                   self.savedir.joinpath(save_name))
         self.run_hook("post_save_hook")
 
     def _eval(self, val_test, debug=False):
         loader = self.dataloaders[val_test]
-        self.run_hook_with_args("pre_eval_hook", val_test)
+        self.run_hook_with_args("pre_eval_hook", loop=val_test)
         for i, batch in enumerate(loader):
             self.eval_one_batch(val_test, i, batch)
-        self.run_hook_with_args("post_eval_hook", val_test)
+        self.run_hook_with_args("post_eval_hook", loop=val_test)
 
     def validate(self):
         self._eval("val")
@@ -392,7 +331,7 @@ class Trainer:
         self._eval("test")
 
     def eval_one_batch(self, val_or_test, i, batch):
-        self.run_hook_with_args("pre_batch_hook", val_or_test)
+        self.run_hook_with_args("pre_batch_hook", loop=val_or_test)
         self.update_function.train = False
         with torch.no_grad():
             with self.timer:
@@ -400,20 +339,20 @@ class Trainer:
                                               model=self.model, optimizer=self.optimizer,
                                               trainer=self)
         retval.update(self.timer.as_dict)
-        self.run_hook_with_args("post_batch_hook", val_or_test, retval)
+        self.run_hook_with_args("post_batch_hook", loop=val_or_test, retval=retval)
 
     def train_one_batch(self, i, batch):
-        self.run_hook_with_args("pre_batch_hook", "train")
+        self.run_hook_with_args("pre_batch_hook", loop="train")
         self.update_function.train = True
         with self.timer:
             retval = self.update_function(batch=batch, criterion=self.criterion,
                                           model=self.model, optimizer=self.optimizer,
                                           trainer=self)
         retval.update(self.timer.as_dict)
-        self.run_hook_with_args("post_batch_hook", "train", retval)
+        self.run_hook_with_args("post_batch_hook", loop="train", retval=retval)
 
     def run_one_epoch(self):
-        self.logger.info(f"Training epoch {self.epoch+1}")
+        self.logger.info(f"Training _epoch {self.epoch+1}")
         self.run_hook("pre_epoch_hook")
         for i, batch in enumerate(self.dataloaders["train"]):
             self.train_one_batch(i, batch)

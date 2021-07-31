@@ -1,22 +1,9 @@
 import torch
 import numpy as np
-import time
-
-
-class Timer:
-    def __enter__(self):
-        self._start = time.time()
-
-    def __exit__(self, *args):
-        self._time = time.time() - self._start
-
-    @property
-    def as_dict(self):
-        return {"time": self._time}
 
 
 def initialize_seed(self):
-    seed = self.trainer_params.seed
+    seed: int = self.trainer_params.seed
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
 
@@ -25,8 +12,9 @@ def pre_val_log(self):
     self.logger.info("Testing the model")
 
 
-def pre_batch_init_batch_vars(self, loop):
-    # loop in ["train", "val", "test"]
+def pre_batch_init_batch_vars(self, **kwargs):
+    """Initialize :code:`trainer.Trainer.batch_vars`"""
+    loop = kwargs["loop"]
     self._batch_running_loss = 0.0
     if not hasattr(self, "_batch_vars"):
         self._batch_vars = {loop: {}}
@@ -34,14 +22,42 @@ def pre_batch_init_batch_vars(self, loop):
         self._batch_vars[loop] = {}
 
 
-def post_batch_update_batch_vars(self, loop, retval):
+def post_batch_update_batch_vars(self, **kwargs):
+    """Update the return values from a batch in `~trainer.Trainer.batch_vars`
+
+    Args:
+        loop: which loop is currently running
+        retval: The value returned by the update function
+
+    """
+    loop, retval = kwargs["loop"], kwargs["retval"]
     for k, v in retval.items():
         if k not in self._batch_vars[loop]:
             self._batch_vars[loop][k] = []
         self._batch_vars[loop][k].append(v)
 
 
-def post_batch_log_running_loss(self, loop, batch_num):
+def post_batch_progress(self, **kwargs):
+    """Display batch progress
+
+    Args:
+        i: batch number
+        loop: which loop is currently running
+    """
+    i = kwargs["i"]
+    loop = kwargs["loop"]
+    lf = self.trainer_params.log_frequency
+    if i % lf == (lf-1):
+        log_str = []
+        for k, v in self.batch_vars[loop].items():
+            val = np.mean(v[i-lf:])
+            log_str.append(f"Average metric {k} for {loop} for last {lf} batches: {val}")
+        self.logger.info(f"Progress for epoch {self.epoch}, batch {i}\n" +
+                         "\n".join(log_str))
+
+
+def post_batch_log_running_loss(self, **kwargs):
+    loop, batch_num = kwargs["loop"], kwargs["batch_num"]
     if batch_num % self.trainer_params.log_frequency ==\
        max(0, self.trainer_params.log_frequency - 1):
         self.logger.info('[%d, %5d] loss: %.3f. %f percent epoch done' %
@@ -55,7 +71,8 @@ def post_epoch_reset_batch_vars(self):
     self._batch_vars = {}
 
 
-def pre_eval_log(self, loop):
+def pre_eval_log(self, **kwargs):
+    loop = kwargs["loop"]
     verb = "Testing" if loop == "test" else "Validating"
     self.logger.info(f"{verb} the model")
 
@@ -68,7 +85,17 @@ def post_epoch_log(self):
     self.logger.debug(f"Finished epoch {self.epoch}")
 
 
-def update_metrics(self, loop):
+def update_metrics(self, **kwargs):
+    """Update the metrics in `trainer.Trainer`.
+
+    For each loop's keys, we append all the variables which exist in values
+    returned by the updated function.
+
+    See also:
+        :class:`models.UpdateFunction`.
+
+    """
+    loop = kwargs["loop"]
     self.logger.debug("Running update_metrics")
     for m in self._metrics[loop]:
         total = np.sum(self._batch_vars[loop]['total'])
@@ -78,10 +105,10 @@ def update_metrics(self, loop):
             self._metrics[loop][m] = {}
         self._metrics[loop][m][self.epoch] = {"total": total_value, "average": avg_value}
         # self._metrics[loop][m][self.epoch]["average"] = avg_value
-        self.logger.info(f'Average {loop} {m} of the network on ' +
-                         f'{total} data instances is: {avg_value}')
         self.logger.info(f'Total {loop} {m} of the network on ' +
                          f'{total} data instances is: {total_value}')
+        self.logger.info(f'Average {loop} {m} of the network on ' +
+                         f'{total} data instances is: {avg_value}')
 
 
 def maybe_validate(self):
@@ -104,7 +131,22 @@ def maybe_test(self):
             self.logger.info("No test loader. Skipping")
 
 
-def maybe_anneal_lr(self, on="loss", after_epoch=20, loss_diff=0.01, multiplier=0.9):
+def maybe_anneal_lr(self, **kwargs):
+    """Maybe anneal the learning rate.
+
+    :code:`on`, :code:`after_epoch`, :code:`diff`, :code:`multiplier` must be
+    present in kwargs.
+
+    For a given metric :code:`on`, if the epoch is greater :code:`after_epoch`, and the
+    difference between the metric for previous epoch is smaller than current
+    epoch, within the fraction :code:`diff`, then we anneal the learning rate.
+
+    The learning rate is multiplied by the :code:`multiplier` (should be below 1).
+
+    """
+
+    on = kwargs["on"], after_epoch = kwargs["after_epoch"]
+    diff = kwargs["diff"], multiplier = kwargs["multiplier"]
     if self.epoch < after_epoch:
         return
     self.logger.debug(f"Running maybe_anneal_lr after epoch {self.epoch}")
@@ -112,7 +154,7 @@ def maybe_anneal_lr(self, on="loss", after_epoch=20, loss_diff=0.01, multiplier=
     values.sort(key=lambda x: x[0])
     old_val = values[-2][1]
     cur_val = values[-1][1]
-    if old_val - cur_val < (loss_diff * old_val):
+    if old_val - cur_val < (diff * old_val):
         for param_group in self.optimizer.param_groups:
             param_group['lr'] *= multiplier
         self.logger.info(f"Annealing running rate by {multiplier}")

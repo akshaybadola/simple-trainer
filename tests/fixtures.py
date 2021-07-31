@@ -2,10 +2,10 @@ import pytest
 import torch
 import torchvision
 import sys
-sys.path.append("..")
 from simple_trainer.models import TrainerParams
 from simple_trainer.trainer import Trainer
-from simple_trainer.helpers import accuracy, ClassificationFunc
+from simple_trainer.helpers import ClassificationFunc
+from simple_trainer.pipeline import Hooks
 
 
 class Net(torch.nn.Module):
@@ -70,6 +70,7 @@ def trainer():
     update_function = ClassificationFunc()
     from torch.optim import SGD
     model = MLP(10, 10)
+    model.model_name = "MLP"
     optimizer = SGD(model.parameters(), lr=0.01, momentum=0.9)
     trainer = Trainer("test_trainer", params, optimizer, model,
                       data={"name": "test_data", "train": train_data, "val": val_data, "test": None},
@@ -86,6 +87,7 @@ def trainer_with_mnist():
     update_function = ClassificationFunc()
     from torch.optim import Adam
     model = Net()
+    model.model_name = "Net"
     optimizer = Adam(model.parameters(), lr=0.01)
     data = {"name": "mnist",
             "train": torchvision.datasets.MNIST('.data',
@@ -117,3 +119,9 @@ def trainer_with_mnist():
                       data=data, dataloaders=dataloaders,
                       update_function=update_function, criterion=torch.nn.CrossEntropyLoss())
     return trainer
+
+
+@pytest.fixture
+def hooks(trainer):
+    hooks = Hooks(trainer.logger)
+    return hooks

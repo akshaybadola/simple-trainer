@@ -30,11 +30,11 @@ def test_trainer_add_remove_hook(trainer):
         trainer._added_by_test_func = "test"
     trainer.add_hook("pre_resume_hook", test_func)
     assert trainer.describe_hook("pre_resume_hook")
-    trainer._try_resume()
+    trainer.try_resume()
     assert trainer._added_by_test_func == "test"
     trainer.remove_hook_at("pre_resume_hook", 0)
     delattr(trainer, "_added_by_test_func")
-    trainer._try_resume()
+    trainer.try_resume()
     assert not hasattr(trainer, "_added_by_test_func")
 
 
@@ -46,4 +46,4 @@ def test_trainer_one_batch(trainer_with_mnist):
     trainer.eval_one_batch("test", 0, test_batch)
     test_batch = trainer._dataloaders["test"].__iter__().__next__()
     trainer.eval_one_batch("test", 1, test_batch)
-    trainer.run_hook_with_args("post_eval_hook", "test")
+    trainer.run_hook_with_args("post_eval_hook", loop="test")

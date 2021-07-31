@@ -2,6 +2,50 @@ from typing import Union, List, Optional, Any, Callable, Iterable, Dict
 from pathlib import Path
 from pydantic import BaseModel, validator
 from torch.utils.data.distributed import DistributedSampler
+import abc
+
+
+class UpdateFunction(abc.ABC):
+    @abc.abstractmethod
+    def __call__(self, batch: Iterable, *args, **kwargs) -> Dict[str, Any]:
+        """Call the Step
+
+        Args:
+            batch: A data specific iterable of values
+
+        :meth:`__call__` is provided by the user and can have different modes.
+        Standard modes are :code:`train` and :code:`test`.
+
+        The execution flow and artefacts accumulated can depend on the
+        modes. They have to be implemented by the user.
+
+        """
+        pass
+
+    @property
+    @abc.abstractmethod
+    def train(self) -> bool:
+        """Are we in train mode?
+
+        :code:`self._train` must be defined."""
+        return self._train      # type: ignore
+
+    @property
+    def returns(self) -> List[str]:
+        """The return value by the Update Function
+
+        The return value is a :class:`dict` of all the artefacts returned by the
+        model and any other intermediate or tertiary values, which need to be
+        stored/logged.
+
+        :code:`self._returns` must be defined in :code:`__init__`
+        """
+        return self._returns    # type: ignore
+
+    @returns.setter             # type: ignore
+    @abc.abstractmethod
+    def returns(self):
+        pass
 
 
 def gpus_must_evaluate_to_list_of_int(v: Union[List[int], int, str, None]) ->\
