@@ -144,9 +144,10 @@ def maybe_anneal_lr(self, **kwargs):
     The learning rate is multiplied by the :code:`multiplier` (should be below 1).
 
     """
-
-    on = kwargs["on"], after_epoch = kwargs["after_epoch"]
-    diff = kwargs["diff"], multiplier = kwargs["multiplier"]
+    on = kwargs["on"]
+    after_epoch = kwargs["after_epoch"]
+    diff = kwargs["diff"]
+    multiplier = kwargs["multiplier"]
     if self.epoch < after_epoch:
         return
     self.logger.debug(f"Running maybe_anneal_lr after epoch {self.epoch}")

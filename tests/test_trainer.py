@@ -8,7 +8,7 @@ def test_trainer_init():
     pass
 
 
-def test_trainer_params():
+def test_trainer_params_assign():
     from simple_trainer.models import TrainerParams
     params = {"gpus": 0, "cuda": True, "seed": 1111, "resume": False, "metrics":
               ["loss", "accuracy"], "log_frequency": 1, "test_frequency": 1,
@@ -47,3 +47,8 @@ def test_trainer_one_batch(trainer_with_mnist):
     test_batch = trainer._dataloaders["test"].__iter__().__next__()
     trainer.eval_one_batch("test", 1, test_batch)
     trainer.run_hook_with_args("post_eval_hook", loop="test")
+    # check for collected metrics
+
+
+def test_train_ddp():
+    pass

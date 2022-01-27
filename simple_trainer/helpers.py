@@ -2,9 +2,6 @@ from typing import Union, List, Optional, Any, Callable, Iterable, Dict, Tuple
 import torch
 
 
-Item = Union[int, float, bool]
-
-
 def correct_topk(outputs: torch.FloatTensor,
                  labels: torch.LongTensor, k: int = 1) -> int:
     """Total number of correct output values along the batch dimension.
@@ -82,9 +79,10 @@ class ClassificationFunc:
         self.train = True
         self.returns = ["loss", "accuracy", "total"]
 
-    def __call__(self, batch: torch.FloatTensor,
+    def __call__(self, batch: Tuple[torch.FloatTensor, torch.LongTensor],
                  criterion: Union[torch.nn.Module, Callable],
-                 model: torch.nn.Module, optimizer: torch.optim.optimizer.Optimizer,
+                 model: torch.nn.Module,
+                 optimizer: torch.optim.Optimizer,  # type: ignore
                  **kwargs):
         inputs, labels = batch
         inputs, labels = model.to_(inputs), model.to_(labels)
@@ -97,5 +95,5 @@ class ClassificationFunc:
             optimizer.step()
         total_correct = correct(outputs, labels)
         return {"loss": loss.item(),
-                "accuracy": float(total_correct/len(inputs)),
-                "total": len(inputs)}
+                "accuracy": float(total_correct/inputs.size()[0]),
+                "total": inputs.size()[0]}

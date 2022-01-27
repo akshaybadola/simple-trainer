@@ -1,12 +1,11 @@
-from typing import Union, List, Optional, Any, Callable, Iterable, Dict, cast
+from typing import Union, List, Optional, Any, Callable, Iterable, Dict
+
 import os
-import torch
-import torch.multiprocessing as mp
-from torch.utils.data.distributed import DistributedSampler
-import torch.distributed as distributed
-import inspect
 from functools import partial
 from pathlib import Path
+import inspect
+
+import torch
 
 from common_pyutil.decorators import Tag
 from common_pyutil.contexts import Timer
@@ -33,6 +32,12 @@ cmd = Tag("cmd")
 
 
 class Trainer(Hooks):
+    """:class:`Trainer` is a kind of :class:`Hooks` with certain functions.
+
+    It has different initialization and intermediate functions specific to
+    training a `Deep Learning` model.
+
+    """
     def __init__(self, name, trainer_params: Dict[str, Any],
                  optimizer, model, data: Dict[str, Any], dataloaders,
                  update_function: Dict[str, UpdateFunction],
@@ -113,27 +118,40 @@ class Trainer(Hooks):
         else:
             self._model.to_ = lambda x: x.to(torch.device("cpu"))
 
+    def pp(self, func):
+        return self._prepare_function(func)
+
+    def _prepare_function(self, func):
+        return partial(func, self)
+
     def _init_hooks(self):
-        """Initialize all hooks."""
+        """Initialize all hooks.
+
+        For the :class:`Trainer` each function in a hook must take an instance
+        of :class:`trainer` itself as the first argument.
+
+        """
         super().__init__(self.logger)
-        self._hooks = {"post_init_hook": [initialize_seed],
+        self._hooks = {"post_init_hook": [self.pp(initialize_seed)],
                        "pre_resume_hook": [],
                        "post_resume_hook": [],
                        "pre_save_hook": [],
                        "post_save_hook": [],
-                       "pre_eval_hook": [pre_eval_log],
-                       "post_eval_hook": [update_metrics],
-                       "pre_batch_hook": [pre_batch_init_batch_vars],
-                       "post_batch_hook": [post_batch_update_batch_vars],
-                       "pre_training_hook": [pre_train_log],
+                       "pre_eval_hook": [self.pp(pre_eval_log)],
+                       "post_eval_hook": [self.pp(update_metrics)],
+                       "pre_batch_hook": [self.pp(pre_batch_init_batch_vars)],
+                       "post_batch_hook": [self.pp(post_batch_update_batch_vars)],
+                       "pre_training_hook": [self.pp(pre_train_log)],
                        "post_training_hook": [],
                        "pre_epoch_hook": [],
-                       "post_epoch_hook": [post_epoch_log,
-                                           partial(update_metrics, loop="train"),
-                                           maybe_validate, maybe_test,
-                                           increment_epoch, dump_state,
-                                           save_checkpoint, save_best,
-                                           post_epoch_reset_batch_vars]}
+                       "post_epoch_hook": [*map(self.pp,
+                                                [post_epoch_log,
+                                                 partial(update_metrics, loop="train"),
+                                                 maybe_validate, maybe_test,
+                                                 increment_epoch, dump_state,
+                                                 save_checkpoint, save_best,
+                                                 post_epoch_reset_batch_vars])]}
+        # CHECK: Do we really need to do this?
         for hook in self._hooks:
             setattr(self, f"run_{hook}", partial(self.run_hook, hook))
         cmd.add(self.add_hook)
@@ -205,10 +223,13 @@ class Trainer(Hooks):
     def update_function(self):
         return self._update_function
 
+    # TODO: Either we require that it implement UpdateFunction or that it
+    #       conforms to the signature
     @update_function.setter
     def update_function(self, func):
         if not isinstance(func, UpdateFunction):
             self.logger.error(f"{func} must be an instance of {UpdateFunction}")
+            # FIXME: This doesn't do anything right now
         if not callable(func):
             self.logger.error(f"Not Callable {func}")
         elif not hasattr(func, "train"):
@@ -358,29 +379,10 @@ class Trainer(Hooks):
             self.train_one_batch(i, batch)
         self.run_hook("post_epoch_hook")
 
-    def train_ddp(self, gpu):
-        rank = self.ddp_params.node_rank * self.ddp_params.num_gpus + gpu
-        self._ddp_gpu = gpu
-        for k, v in self.dataloaders.items():
-            if v is not None:
-                sampler = DistributedSampler(self.data[k],
-                                             num_replicas=self.ddp_params.world_size,
-                                             rank=rank)
-                self.dataloaders[k].sampler = sampler
-        distributed.init_process_group(backend='nccl',
-                                       init_method=self.ddp_params.init_method,
-                                       world_size=self.ddp_params.world_size,
-                                       rank=rank)
-
     def train(self):
         self.run_hook("pre_training_hook")
-        if self.ddp_params:
-            self.logger.info("Will train in a distributed manner")
-            self.logger.info(f"Spawning {self.ddp_params.num_gpus} processes")
-            mp.spawn(self.train, nprocs=self.ddp_params.num_gpus)
-        else:
-            while self.epoch < self.trainer_params.max_epochs:
-                self.run_one_epoch()
+        while self.epoch < self.trainer_params.max_epochs:
+            self.run_one_epoch()
         self.run_hook("post_training_hook")
         self.logger.info('Finished training')
 

@@ -68,6 +68,17 @@ def gpus_must_evaluate_to_list_of_int(v: Union[List[int], int, str, None]) ->\
 
 
 class DDPParams(BaseModel):
+    """Distributed Data Parallel parameters.
+
+    Args:
+        backend: One of `torch.distributed` backends
+        init_method: defaults to `env`. Although TCP can also be used but it's useful to
+                     set NCCL_DEBUG to INFO
+        num_gpus: Number of gpus in DDP
+        node_rank: Rank of current node
+        sampler: The distributed sampler to use
+
+    """
     backend: str
     init_method: str
     world_size: int

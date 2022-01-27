@@ -1,14 +1,14 @@
 [tool.poetry]
 name = "simple_trainer"
-version = "0.1.0"
+version = "0.3.0"
 description = "A micro-training-framework on top of pytorch for Machine Learning and Deep Learning"
 authors = ["Akshay <atavist13@gmail.com>"]
 license = "MIT"
 
 [tool.poetry.dependencies]
 python = "^3.7"
-torch = "^1.9.0"
-numpy = "^1.21.1"
+torch = "^1.2.0"
+numpy = "^1.17.0"
 pynvml = "^8.0.3"
 pydantic = { git = "https://github.com/akshaybadola/pydantic.git" }
 common-pyutil = "^0.6.1"
