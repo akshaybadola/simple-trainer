@@ -41,18 +41,20 @@ def post_batch_progress(self, **kwargs):
     """Display batch progress
 
     Args:
-        i: batch number
+        batch_num: batch number
         loop: which loop is currently running
     """
-    i = kwargs["i"]
+    batch_num = kwargs["batch_num"]
     loop = kwargs["loop"]
     lf = self.trainer_params.log_frequency
-    if i % lf == (lf-1):
+    if batch_num % lf == (lf-1):
         log_str = []
         for k, v in self.batch_vars[loop].items():
-            val = np.mean(v[i-lf:])
+            val = np.mean(v[batch_num-lf:])
             log_str.append(f"Average metric {k} for {loop} for last {lf} batches: {val}")
-        self.logger.info(f"Progress for epoch {self.epoch}, batch {i}\n" +
+        time_taken = sum(self.batch_vars[loop]["time"])
+        log_str.append(f"Total time taken for last {lf} batches: {time_taken}")
+        self.logger.info(f"Progress for epoch {self.epoch}, batch {batch_num}\n" +
                          "\n".join(log_str))
 
 

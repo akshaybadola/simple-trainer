@@ -27,8 +27,22 @@ class UpdateFunction(abc.ABC):
     def train(self) -> bool:
         """Are we in train mode?
 
-        :code:`self._train` must be defined."""
+        :code:`self._train` must be defined.
+
+        The deriving class may also override @train.setter
+
+        """
         return self._train      # type: ignore
+
+    @train.setter
+    def train(self, x: bool):
+        """Set the training status of self
+
+        Args:
+            x: boolean training status
+
+        """
+        self._train = x
 
     @property
     def returns(self) -> List[str]:
@@ -38,7 +52,11 @@ class UpdateFunction(abc.ABC):
         model and any other intermediate or tertiary values, which need to be
         stored/logged.
 
+        The property :meth:`returns` defines the names of all the artefacts
+        returned by the :class:`UpdateFunction`
+
         :code:`self._returns` must be defined in :code:`__init__`
+
         """
         return self._returns    # type: ignore
 

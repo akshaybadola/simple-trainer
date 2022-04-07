@@ -8,7 +8,7 @@ import inspect
 import torch
 
 from common_pyutil.decorators import Tag
-from common_pyutil.contexts import Timer
+from common_pyutil.monitor import Timer
 from common_pyutil.log import get_file_and_stream_logger
 
 from .pipeline import Hooks
@@ -90,7 +90,7 @@ class Trainer(Hooks):
         else:
             self._resume_path = None
         for func in post_init_hooks:
-            self.add_hook("post_init_hook", func, "last")
+            self.add_to_hook("post_init_hook", func, "last")
         self._batch_vars: Dict[str, Any] = {}
         self.extra_opts = extra_opts
         self.run_hook("post_init_hook")
@@ -154,11 +154,11 @@ class Trainer(Hooks):
         # CHECK: Do we really need to do this?
         for hook in self._hooks:
             setattr(self, f"run_{hook}", partial(self.run_hook, hook))
-        cmd.add(self.add_hook)
-        cmd.add(self.add_hook_before)
-        cmd.add(self.add_hook_after)
-        cmd.add(self.remove_hook)
-        cmd.add(self.remove_hook_at)
+        cmd.add(self.add_to_hook)
+        cmd.add(self.add_to_hook_before)
+        cmd.add(self.add_to_hook_after)
+        cmd.add(self.remove_from_hook)
+        cmd.add(self.remove_from_hook_at)
         cmd.add(self.describe_hook)
 
     @property
@@ -234,6 +234,8 @@ class Trainer(Hooks):
             self.logger.error(f"Not Callable {func}")
         elif not hasattr(func, "train"):
             self.logger.error(f"Attribute train not in {func}")
+        elif not hasattr(func, "returns"):
+            self.logger.error(f"Attribute returns not in {func}")
         else:
             sig = inspect.signature(func).parameters
             if "batch" not in sig:
@@ -351,7 +353,7 @@ class Trainer(Hooks):
     def test(self):
         self._eval("test")
 
-    def eval_one_batch(self, val_or_test, i, batch):
+    def eval_one_batch(self, val_or_test, batch_num, batch):
         self.run_hook_with_args("pre_batch_hook", loop=val_or_test)
         self.update_function.train = False
         with torch.no_grad():
@@ -360,9 +362,10 @@ class Trainer(Hooks):
                                               model=self.model, optimizer=self.optimizer,
                                               trainer=self)
         retval.update(self.timer.as_dict)
-        self.run_hook_with_args("post_batch_hook", loop=val_or_test, retval=retval)
+        self.run_hook_with_args("post_batch_hook", loop=val_or_test, retval=retval,
+                                batch_num=batch_num)
 
-    def train_one_batch(self, i, batch):
+    def train_one_batch(self, batch_num, batch):
         self.run_hook_with_args("pre_batch_hook", loop="train")
         self.update_function.train = True
         with self.timer:
@@ -370,7 +373,8 @@ class Trainer(Hooks):
                                           model=self.model, optimizer=self.optimizer,
                                           trainer=self)
         retval.update(self.timer.as_dict)
-        self.run_hook_with_args("post_batch_hook", loop="train", retval=retval)
+        self.run_hook_with_args("post_batch_hook", loop="train", retval=retval,
+                                batch_num=batch_num)
 
     def run_one_epoch(self):
         self.logger.info(f"Training _epoch {self.epoch+1}")

@@ -169,7 +169,7 @@ class Hooks(abc.ABC):
             for func in hook:
                 func(**kwargs)
 
-    def add_hook(self, hook_name: str, func: Callable, position: Union[int, str] = 0):
+    def add_to_hook(self, hook_name: str, func: Callable, position: Union[int, str] = 0):
         """Add function :code:`func` to hook_name with name `hook_name`.
 
         Args:
@@ -195,13 +195,13 @@ class Hooks(abc.ABC):
                 raise ValueError(f"Unknown Value for position {position}")
             self._hooks[hook_name].insert(pos, func)
 
-    def add_hook_at_end(self, hook_name: str, func: Callable):
-        self.add_hook(hook_name, func, "last")
+    def add_to_hook_at_end(self, hook_name: str, func: Callable):
+        self.add_to_hook(hook_name, func, "last")
 
-    def add_hook_at_beginning(self, hook_name: str, func: Callable):
-        self.add_hook(hook_name, func, "first")
+    def add_to_hook_at_beginning(self, hook_name: str, func: Callable):
+        self.add_to_hook(hook_name, func, "first")
 
-    def add_hook_before(self, hook_name: str, func: Callable, before_func: str):
+    def add_to_hook_before(self, hook_name: str, func: Callable, before_func: str):
         """Add function :code:`func` to hook with given name.
 
         Args:
@@ -221,7 +221,7 @@ class Hooks(abc.ABC):
             else:
                 raise ValueError(f"No such func {before_func}")
 
-    def add_hook_after(self, hook_name: str, func: Callable, after_func: str):
+    def add_to_hook_after(self, hook_name: str, func: Callable, after_func: str):
         """Add function :code:`func` to hook with given name.
 
         Args:
@@ -241,7 +241,7 @@ class Hooks(abc.ABC):
             else:
                 raise ValueError(f"No such func {after_func}")
 
-    def remove_hook(self, hook_name: str, function_name: str):
+    def remove_from_hook(self, hook_name: str, function_name: str):
         """Remove from named hook the named function.
 
         Args:
@@ -257,7 +257,7 @@ class Hooks(abc.ABC):
             func = first(hook, lambda x: partial_or_func_name(x) == function_name)
             self._hooks[hook_name].remove(func)
 
-    def remove_hook_at(self, hook_name: str, position: int):
+    def remove_from_hook_at(self, hook_name: str, position: int):
         """Remove from named hook the function at position.
 
         Args:
