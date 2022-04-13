@@ -50,10 +50,11 @@ def post_batch_progress(self, **kwargs):
     if batch_num % lf == (lf-1):
         log_str = []
         for k, v in self.batch_vars[loop].items():
-            val = np.mean(v[batch_num-lf:])
-            log_str.append(f"Average metric {k} for {loop} for last {lf} batches: {val}")
+            if k in self.metrics[loop]:
+                val = np.mean(v[batch_num-lf:])
+                log_str.append(f"Average metric {k} for {loop} for last {lf} batches: {val}")
         time_taken = sum(self.batch_vars[loop]["time"])
-        log_str.append(f"Total time taken for last {lf} batches: {time_taken}")
+        log_str.append(f"Total time taken for current epoch: {time_taken}")
         self.logger.info(f"Progress for epoch {self.epoch}, batch {batch_num}\n" +
                          "\n".join(log_str))
 

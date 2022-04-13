@@ -14,14 +14,14 @@ from common_pyutil.log import get_file_and_stream_logger
 from .pipeline import Hooks
 
 from .models import TrainerParams, DDPParams, UpdateFunction
-from .hook_functions import (pre_train_log, save_checkpoint,
-                             pre_eval_log, post_epoch_log,
-                             pre_batch_init_batch_vars,
-                             post_batch_update_batch_vars,
-                             post_epoch_reset_batch_vars,
-                             maybe_test, maybe_validate,
-                             initialize_seed, dump_state,
-                             update_metrics, save_best)
+from .functions import (pre_train_log, save_checkpoint,
+                        pre_eval_log, post_epoch_log,
+                        pre_batch_init_batch_vars,
+                        post_batch_update_batch_vars,
+                        post_epoch_reset_batch_vars,
+                        maybe_test, maybe_validate,
+                        initialize_seed, dump_state,
+                        update_metrics, save_best)
 
 
 def increment_epoch(self):
@@ -41,10 +41,15 @@ class Trainer(Hooks):
     def __init__(self, name, trainer_params: Dict[str, Any],
                  optimizer, model, data: Dict[str, Any], dataloaders,
                  update_function: Dict[str, UpdateFunction],
-                 criterion, ddp_params: Optional[Dict[str, Any]] = {},
+                 criterion, savedir: Union[str, Path] = "saves",
+                 logdir: Union[str, Path] = "logs",
+                 ddp_params: Optional[Dict[str, Any]] = {},
                  extra_opts: Dict[str, Any] = {},
                  post_init_hooks: List[Callable] = []):
-        self.log_file, self.logger = get_file_and_stream_logger("logs", name,
+        self._logdir = Path(logdir)
+        if not self._logdir.exists():
+            os.mkdir(self._logdir)
+        self.log_file, self.logger = get_file_and_stream_logger(self._logdir, name,
                                                                 name, "debug",
                                                                 "info", "debug",
                                                                 new_file=True)
@@ -65,7 +70,7 @@ class Trainer(Hooks):
         self._init_metrics()
         self._init_hooks()
         self.timer = Timer()
-        self._savedir = Path("saves")
+        self._savedir = Path(savedir)
         if not self.savedir.exists():
             os.mkdir(self.savedir)
         self._checkpoint_prefix = "checkpoint"
@@ -358,9 +363,11 @@ class Trainer(Hooks):
         self.update_function.train = False
         with torch.no_grad():
             with self.timer:
-                retval = self.update_function(batch=batch, criterion=self.criterion,
-                                              model=self.model, optimizer=self.optimizer,
-                                              trainer=self)
+                self.model.eval()
+                with torch.no_grad():
+                    retval = self.update_function(batch=batch, criterion=self.criterion,
+                                                  model=self.model, optimizer=self.optimizer,
+                                                  trainer=self)
         retval.update(self.timer.as_dict)
         self.run_hook_with_args("post_batch_hook", loop=val_or_test, retval=retval,
                                 batch_num=batch_num)
@@ -369,6 +376,7 @@ class Trainer(Hooks):
         self.run_hook_with_args("pre_batch_hook", loop="train")
         self.update_function.train = True
         with self.timer:
+            self.model.train()
             retval = self.update_function(batch=batch, criterion=self.criterion,
                                           model=self.model, optimizer=self.optimizer,
                                           trainer=self)
@@ -379,8 +387,19 @@ class Trainer(Hooks):
     def run_one_epoch(self):
         self.logger.info(f"Training _epoch {self.epoch+1}")
         self.run_hook("pre_epoch_hook")
-        for i, batch in enumerate(self.dataloaders["train"]):
-            self.train_one_batch(i, batch)
+        it = self.dataloaders["train"].__iter__()
+        i = 0
+        try:
+            while True:
+                with self.timer:
+                    batch = it.__next__()
+                # self.logger.info(f"Got one batch in {self.timer.time} seconds")
+                self.train_one_batch(i, batch)
+                i += 1
+        except StopIteration:
+            pass
+        # for i, batch in enumerate(self.dataloaders["train"]):
+        #     self.train_one_batch(i, batch)
         self.run_hook("post_epoch_hook")
 
     def train(self):
