@@ -46,6 +46,8 @@ def post_batch_progress(self, **kwargs):
     """
     batch_num = kwargs["batch_num"]
     loop = kwargs["loop"]
+    total_iters = kwargs["total_iters"]
+    batch_time = kwargs["batch_time"]
     lf = self.trainer_params.log_frequency
     if batch_num % lf == (lf-1):
         log_str = []
@@ -54,8 +56,9 @@ def post_batch_progress(self, **kwargs):
                 val = np.mean(v[batch_num-lf:])
                 log_str.append(f"Average metric {k} for {loop} for last {lf} batches: {val}")
         time_taken = sum(self.batch_vars[loop]["time"])
-        log_str.append(f"Total time taken for current epoch: {time_taken}")
-        self.logger.info(f"Progress for epoch {self.epoch}, batch {batch_num}\n" +
+        log_str.append(f"Time for getting one batch {batch_time}")
+        log_str.append(f"Total time taken for forward pass for current loop. {time_taken}")
+        self.logger.info(f"Progress for epoch {self.epoch}, batch {batch_num}/{total_iters}\n" +
                          "\n".join(log_str))
 
 

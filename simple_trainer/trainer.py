@@ -348,8 +348,20 @@ class Trainer(Hooks):
     def _eval(self, val_test, debug=False):
         loader = self.dataloaders[val_test]
         self.run_hook_with_args("pre_eval_hook", loop=val_test)
-        for i, batch in enumerate(loader):
-            self.eval_one_batch(val_test, i, batch)
+        total_iters = len(loader)
+        it = loader.__iter__()
+        i = 0
+        try:
+            while True:
+                with self.timer:
+                    batch = it.__next__()
+                self.eval_one_batch(val_test, i, total_iters, batch_time=self.timer.time,
+                                    batch=batch)
+                i += 1
+        except StopIteration:
+            pass
+        # for i, batch in enumerate(loader):
+        #     self.eval_one_batch(val_test, i, batch)
         self.run_hook_with_args("post_eval_hook", loop=val_test)
 
     def validate(self):
@@ -358,7 +370,7 @@ class Trainer(Hooks):
     def test(self):
         self._eval("test")
 
-    def eval_one_batch(self, val_or_test, batch_num, batch):
+    def eval_one_batch(self, val_or_test, batch_num, total_iters, batch_time, batch):
         self.run_hook_with_args("pre_batch_hook", loop=val_or_test)
         self.update_function.train = False
         with torch.no_grad():
@@ -370,9 +382,10 @@ class Trainer(Hooks):
                                                   trainer=self)
         retval.update(self.timer.as_dict)
         self.run_hook_with_args("post_batch_hook", loop=val_or_test, retval=retval,
-                                batch_num=batch_num)
+                                batch_num=batch_num, total_iters=total_iters,
+                                batch_time=batch_time)
 
-    def train_one_batch(self, batch_num, batch):
+    def train_one_batch(self, batch_num, total_iters, batch_time, batch):
         self.run_hook_with_args("pre_batch_hook", loop="train")
         self.update_function.train = True
         with self.timer:
@@ -382,19 +395,21 @@ class Trainer(Hooks):
                                           trainer=self)
         retval.update(self.timer.as_dict)
         self.run_hook_with_args("post_batch_hook", loop="train", retval=retval,
-                                batch_num=batch_num)
+                                batch_num=batch_num, total_iters=total_iters,
+                                batch_time=batch_time)
 
     def run_one_epoch(self):
         self.logger.info(f"Training _epoch {self.epoch+1}")
         self.run_hook("pre_epoch_hook")
+        total_iters = len(self.dataloaders["train"])
         it = self.dataloaders["train"].__iter__()
         i = 0
         try:
             while True:
                 with self.timer:
                     batch = it.__next__()
-                # self.logger.info(f"Got one batch in {self.timer.time} seconds")
-                self.train_one_batch(i, batch)
+                self.train_one_batch(i, total_iters, batch_time=self.timer.time,
+                                     batch=batch)
                 i += 1
         except StopIteration:
             pass
