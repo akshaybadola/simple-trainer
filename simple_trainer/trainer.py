@@ -49,7 +49,7 @@ class Trainer(Hooks):
         self._logdir = Path(logdir)
         if not self._logdir.exists():
             os.mkdir(self._logdir)
-        self.log_file, self.logger = get_file_and_stream_logger(self._logdir, name,
+        self.log_file, self.logger = get_file_and_stream_logger(str(self._logdir), name,
                                                                 name, "debug",
                                                                 "info", "debug",
                                                                 new_file=True)
@@ -257,14 +257,40 @@ class Trainer(Hooks):
 
     @property
     def savedir(self) -> Path:
+        """Return the directory where all the dumps and checkpoints are stored.
+        """
         return self._savedir
+
+    @savedir.setter
+    def savedir(self, x: Union[str, Path]):
+        self._savedir = Path(x)
+        if not self._savedir.exists():
+            os.mkdir(self._savedir)
+
+    @property
+    def logdir(self) -> Path:
+        """Return the directory where the logfiles are stored.
+
+        There's no setter for this property as logger is initialized early.
+        """
+        return self._logdir
 
     @property
     def criterion(self):
+        """Return the current criterion.
+
+        Criterion can be changed during training but that is not advisable and
+        should be done with caution.
+
+        """
         return self._criterion
 
     @property
     def trainer_params(self) -> TrainerParams:
+        """Return all the :class:`Trainer`'s training specific paramters.
+
+
+        """
         return self._trainer_params
 
     @trainer_params.setter
