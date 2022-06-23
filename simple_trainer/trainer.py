@@ -398,9 +398,9 @@ class Trainer(Hooks):
 
     def eval_one_batch(self, val_or_test, batch_num, total_iters, batch_time, batch):
         self.run_hook_with_args("pre_batch_hook", loop=val_or_test)
-        self.update_function.train = False
         with torch.no_grad():
             with self.timer:
+                self.update_function.train = False
                 self.model.eval()
                 with torch.no_grad():
                     retval = self.update_function(batch=batch, criterion=self.criterion,
@@ -413,8 +413,8 @@ class Trainer(Hooks):
 
     def train_one_batch(self, batch_num, total_iters, batch_time, batch):
         self.run_hook_with_args("pre_batch_hook", loop="train")
-        self.update_function.train = True
         with self.timer:
+            self.update_function.train = True
             self.model.train()
             retval = self.update_function(batch=batch, criterion=self.criterion,
                                           model=self.model, optimizer=self.optimizer,

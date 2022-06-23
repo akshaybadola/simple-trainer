@@ -29,6 +29,8 @@ def post_batch_update_batch_vars(self, **kwargs):
         loop: which loop is currently running
         retval: The value returned by the update function
 
+    We *ONLY* retain values returned by the update function.
+
     """
     loop, retval = kwargs["loop"], kwargs["retval"]
     for k, v in retval.items():
@@ -43,22 +45,35 @@ def post_batch_progress(self, **kwargs):
     Args:
         batch_num: batch number
         loop: which loop is currently running
+
+    In addition to `batch_vars` also display time to fetch the batch from the dataloader.
+
     """
     batch_num = kwargs["batch_num"]
     loop = kwargs["loop"]
-    total_iters = kwargs["total_iters"]
-    batch_time = kwargs["batch_time"]
+    total_iters = kwargs["total_iters"]  # total length of dataloader
+    batch_time = kwargs["batch_time"]  # starts from 0
     lf = self.trainer_params.log_frequency
-    if batch_num % lf == (lf-1):
+    if not (batch_num+1) % lf:
+        last_few_batch_times = batch_time * lf
+        update_func_time = sum(self.batch_vars[loop]["time"][-lf:])
+        total_time_taken = last_few_batch_times + update_func_time
+        avg_time_taken = total_time_taken/lf
+        total_points = sum(self.batch_vars[loop]['total'][-lf:])
         log_str = []
         for k, v in self.batch_vars[loop].items():
             if k in self.metrics[loop]:
-                val = np.mean(v[batch_num-lf:])
-                log_str.append(f"Average metric {k} for {loop} for last {lf} batches: {val}")
-        time_taken = sum(self.batch_vars[loop]["time"])
-        log_str.append(f"Time for getting one batch {batch_time}")
-        log_str.append(f"Total time taken for forward pass for current loop. {time_taken}")
-        self.logger.info(f"Progress for epoch {self.epoch}, batch {batch_num}/{total_iters}\n" +
+                val = sum(v[-lf:])/total_points
+                log_str.append(f"Average metric \"{k}\" per data point for \"{loop}\"" +
+                               f" for last {lf} batches: {val}")
+        log_str.append(f"Time for getting last one batch for {loop}: {batch_time}")
+        log_str.append(f"Total time taken for forward (+ backward) pass for {loop}: {update_func_time}")
+        log_str.append(f"Estimated time taken for last {lf} batches for {loop}: {total_time_taken}")
+        log_str.append("Estimated time taken per data_point for last " +
+                       f"{lf} batches for {loop}: {total_time_taken/total_points}")
+        log_str.append(f"Estimated total time for {loop}: {avg_time_taken * total_iters}")
+        log_str.append(f"Estimated time remaining for {loop}: {avg_time_taken * (total_iters-(batch_num+1))}")
+        self.logger.info(f"Progress for epoch {self.epoch}, batch {batch_num+1}/{total_iters}\n" +
                          "\n".join(log_str))
 
 
