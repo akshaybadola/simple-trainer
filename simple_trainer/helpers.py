@@ -1,5 +1,6 @@
 from typing import Union, List, Optional, Any, Callable, Iterable, Dict, Tuple
 import torch
+from .models import UpdateFunction
 
 
 def correct_topk(outputs: torch.FloatTensor,
@@ -74,15 +75,48 @@ def accuracy(output: torch.FloatTensor,
     return prec(output, labels, (1,))[0]
 
 
-class ClassificationFunc:
+class SimpleUpdateFunction(UpdateFunction):
     def __init__(self):
-        self.train = True
-        self.returns = ["loss", "accuracy", "total"]
+        self._train = True
+
+    @property
+    def train(self):
+        return self._train
+
+    @train.setter
+    def train(self, x: bool):
+        self._train = x
+
+    @property
+    def returns(self):
+        return self._returns
+
+
+class ClassificationFunc(UpdateFunction):
+    def __init__(self, use_correct=False):
+        self._train = True
+        self.use_correct = use_correct
+        if use_correct:
+            self._returns = ["loss", "correct", "total"]
+        else:
+            self._returns = ["loss", "accuracy", "total"]
+
+    @property
+    def train(self):
+        return self._train
+
+    @train.setter
+    def train(self, x: bool):
+        self._train = x
+
+    @property
+    def returns(self):
+        return self._returns
 
     def __call__(self, batch: Tuple[torch.FloatTensor, torch.LongTensor],
                  criterion: Union[torch.nn.Module, Callable],
                  model: torch.nn.Module,
-                 optimizer: torch.optim.Optimizer,  # type: ignore
+                 optimizer: torch.optim.optimizer.Optimizer,
                  **kwargs):
         inputs, labels = batch
         inputs, labels = model.to_(inputs), model.to_(labels)
@@ -94,9 +128,14 @@ class ClassificationFunc:
             loss.backward()
             optimizer.step()
         total_correct = correct(outputs, labels)
-        return {"loss": loss.item(),
-                "accuracy": float(total_correct/inputs.size()[0]),
-                "total": inputs.size()[0]}
+        if self.use_correct:
+            return {"loss": loss.item(),
+                    "correct": total_correct,
+                    "total": inputs.size()[0]}
+        else:
+            return {"loss": loss.item(),
+                    "accuracy": float(total_correct/inputs.size()[0]),
+                    "total": inputs.size()[0]}
 
 
 def check_min(values):

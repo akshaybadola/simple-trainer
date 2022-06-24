@@ -1,13 +1,18 @@
 from typing import Union, List, Optional, Any, Callable, Iterable, Dict
 from pathlib import Path
 from pydantic import BaseModel, validator
+import torch
 from torch.utils.data.distributed import DistributedSampler
 import abc
 
 
 class UpdateFunction(abc.ABC):
     @abc.abstractmethod
-    def __call__(self, batch: Iterable, *args, **kwargs) -> Dict[str, Any]:
+    def __call__(self, batch: Iterable,
+                 criterion: Union[torch.nn.Module, Callable],
+                 model: torch.nn.Module,
+                 optimizer: torch.optim.optimizer.Optimizer,
+                 *args, **kwargs) -> Dict[str, Any]:
         """Call the Step
 
         Args:

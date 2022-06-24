@@ -233,14 +233,20 @@ class Trainer(Hooks):
     @update_function.setter
     def update_function(self, func):
         if not isinstance(func, UpdateFunction):
-            self.logger.error(f"{func} must be an instance of {UpdateFunction}")
+            self.logger.warning(f"{func} must be an instance of {UpdateFunction}")
             # FIXME: This doesn't do anything right now
-        if not callable(func):
-            self.logger.error(f"Not Callable {func}")
+        elif not callable(func):
+            err_msg = f"Not Callable {func}"
+            self.logger.error(err_msg)
+            raise AttributeError(err_msg)
         elif not hasattr(func, "train"):
-            self.logger.error(f"Attribute train not in {func}")
+            err_msg = f"Attribute train not in {func}"
+            self.logger.error(err_msg)
+            raise AttributeError(err_msg)
         elif not hasattr(func, "returns"):
-            self.logger.error(f"Attribute returns not in {func}")
+            err_msg = f"Attribute returns not in {func}"
+            self.logger.error(err_msg)
+            raise AttributeError(err_msg)
         else:
             sig = inspect.signature(func).parameters
             if "batch" not in sig:
@@ -318,6 +324,13 @@ class Trainer(Hooks):
         for x in ["train", "val", "test"]:
             self._metrics[x] = {m: {} for m in self.trainer_params.metrics}
             self._metrics[x]["time"] = {}
+        metrics = set(m for m in self.trainer_params.metrics)
+        if isinstance(self.update_function, UpdateFunction):
+            diff = set(metrics) - set(self.update_function.returns)
+            if diff:
+                err_msg = f"{diff} metrics are not returned by update_function"
+                self.logger.error(err_msg)
+                raise AttributeError(err_msg)
 
     def try_resume(self):
         self.run_hook("pre_resume_hook")
