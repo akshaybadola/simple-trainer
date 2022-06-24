@@ -11,7 +11,7 @@ class UpdateFunction(abc.ABC):
     def __call__(self, batch: Iterable,
                  criterion: Union[torch.nn.Module, Callable],
                  model: torch.nn.Module,
-                 optimizer: torch.optim.optimizer.Optimizer,
+                 optimizer: torch.optim.Optimizer,  # type: ignore
                  *args, **kwargs) -> Dict[str, Any]:
         """Call the Step
 

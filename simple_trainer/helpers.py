@@ -116,7 +116,7 @@ class ClassificationFunc(UpdateFunction):
     def __call__(self, batch: Tuple[torch.FloatTensor, torch.LongTensor],
                  criterion: Union[torch.nn.Module, Callable],
                  model: torch.nn.Module,
-                 optimizer: torch.optim.optimizer.Optimizer,
+                 optimizer: torch.optim.Optimizer,  # type: ignore
                  **kwargs):
         inputs, labels = batch
         inputs, labels = model.to_(inputs), model.to_(labels)
