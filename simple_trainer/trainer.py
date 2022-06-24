@@ -425,7 +425,7 @@ class Trainer(Hooks):
                                 batch_time=batch_time)
 
     def run_one_epoch(self):
-        self.logger.info(f"Training _epoch {self.epoch+1}")
+        self.logger.info(f"Training epoch {self.epoch+1}")
         self.run_hook("pre_epoch_hook")
         total_iters = len(self.dataloaders["train"])
         it = self.dataloaders["train"].__iter__()

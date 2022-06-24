@@ -2,18 +2,48 @@ import torch
 import numpy as np
 
 
+# TODO: Some functions accept kwargs and some don't
+__doc__ = """Addon functions for :class:`trainer.Trainer`
+
+These functions require a :class:`trainer.Trainer` instance to be passed.
+They are used as separate aspects of the :class:`trainer.Trainer`."""
+
+
+# TODO: Fix seed generation according to updated advice
 def initialize_seed(self):
+    """Initialize a random seed.
+
+    Args:
+        self: Trainer instance
+
+
+    """
     seed: int = self.trainer_params.seed
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
 
 
 def pre_val_log(self):
+    """Pre validation logging default
+
+    Args:
+        self: Trainer instance
+
+
+    """
     self.logger.info("Testing the model")
 
 
 def pre_batch_init_batch_vars(self, **kwargs):
-    """Initialize :code:`trainer.Trainer.batch_vars`"""
+    """Intialize variables after a batch ends
+
+    Vars are stored in the trainer as :code:`trainer.Trainer.batch_vars`
+
+    Args:
+        self: Trainer instance
+
+    """
+
     loop = kwargs["loop"]
     self._batch_running_loss = 0.0
     if not hasattr(self, "_batch_vars"):
@@ -43,6 +73,9 @@ def post_batch_progress(self, **kwargs):
     """Display batch progress
 
     Args:
+        self: Trainer instance
+
+    Kwargs:
         batch_num: batch number
         loop: which loop is currently running
 
@@ -64,8 +97,11 @@ def post_batch_progress(self, **kwargs):
         for k, v in self.batch_vars[loop].items():
             if k in self.metrics[loop]:
                 val = sum(v[-lf:])/total_points
-                log_str.append(f"Average metric \"{k}\" per data point for \"{loop}\"" +
-                               f" for last {lf} batches: {val}")
+                if k == "total":
+                    log_str.append(f"Total data points processed {sum(v[-lf:])} for \"{loop}\"")
+                else:
+                    log_str.append(f"Average metric \"{k}\" per data point for \"{loop}\"" +
+                                   f" for last {lf} batches: {val}")
         log_str.append(f"Time for getting last one batch for {loop}: {batch_time}")
         log_str.append(f"Total time taken for forward (+ backward) pass for {loop}: {update_func_time}")
         log_str.append(f"Estimated time taken for last {lf} batches for {loop}: {total_time_taken}")
@@ -73,7 +109,7 @@ def post_batch_progress(self, **kwargs):
                        f"{lf} batches for {loop}: {total_time_taken/total_points}")
         log_str.append(f"Estimated total time for {loop}: {avg_time_taken * total_iters}")
         log_str.append(f"Estimated time remaining for {loop}: {avg_time_taken * (total_iters-(batch_num+1))}")
-        self.logger.info(f"Progress for epoch {self.epoch}, batch {batch_num+1}/{total_iters}\n" +
+        self.logger.info(f"Progress for epoch {self.epoch+1}, batch {batch_num+1}/{total_iters}\n" +
                          "\n".join(log_str))
 
 
@@ -103,7 +139,7 @@ def pre_train_log(self):
 
 
 def post_epoch_log(self):
-    self.logger.debug(f"Finished epoch {self.epoch}")
+    self.logger.debug(f"Finished epoch {self.epoch+1}")
 
 
 def update_metrics(self, **kwargs):
@@ -204,7 +240,7 @@ def save_best(self):
 def dump_state(self):
     freq = self.trainer_params.dump_frequency
     if self.epoch % freq == (freq - 1):
-        self.logger.debug(f"Dumping state for epoch {self.epoch}")
+        self.logger.debug(f"Dumping state for epoch {self.epoch+1}")
         dump_name = self.checkpoint_name.replace(self._checkpoint_prefix, "dump") +\
-            f"_epoch_{self.epoch:03}"
+            f"_epoch_{(self.epoch+1):03}"
         self._save(dump_name)

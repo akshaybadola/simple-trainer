@@ -97,3 +97,27 @@ class ClassificationFunc:
         return {"loss": loss.item(),
                 "accuracy": float(total_correct/inputs.size()[0]),
                 "total": inputs.size()[0]}
+
+
+def check_min(values):
+    keys = [*values.keys()]
+    keys.sort()
+    vals = [x["total"] for x in values.values()]
+    if len(values) < 2:
+        return False
+    elif values[keys[-1]] == min(vals):
+        return True
+    else:
+        return False
+
+
+def check_max(values):
+    keys = [*values.keys()]
+    keys.sort()
+    vals = [x["total"] for x in values.values()]
+    if len(values) < 2:
+        return False
+    elif values[keys[-1]] == max(vals):
+        return True
+    else:
+        return False
