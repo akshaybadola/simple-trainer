@@ -12,6 +12,8 @@ numpy = "^1.17.0"
 pynvml = "^8.0.3"
 pydantic = { git = "https://github.com/akshaybadola/pydantic.git" }
 common-pyutil = "^0.6.1"
+uvicorn = "^0.18.1"
+starlette = "^0.20.3"
 
 [tool.poetry.dev-dependencies]
 pytest = "^6.2.4"
