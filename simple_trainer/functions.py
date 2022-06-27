@@ -88,6 +88,7 @@ def post_batch_progress(self, **kwargs):
     batch_time = kwargs["batch_time"]  # starts from 0
     lf = self.trainer_params.log_frequency
     if not (batch_num+1) % lf:
+        self.logger.info(f"\nProgress for epoch {self.epoch+1}, batch {batch_num+1}/{total_iters}\n")
         last_few_batch_times = batch_time * lf
         update_func_time = sum(self.batch_vars[loop]["time"][-lf:])
         total_time_taken = last_few_batch_times + update_func_time
@@ -109,8 +110,7 @@ def post_batch_progress(self, **kwargs):
                        f"{lf} batches for {loop}: {total_time_taken/total_points}")
         log_str.append(f"Estimated total time for {loop}: {avg_time_taken * total_iters}")
         log_str.append(f"Estimated time remaining for {loop}: {avg_time_taken * (total_iters-(batch_num+1))}")
-        self.logger.info(f"Progress for epoch {self.epoch+1}, batch {batch_num+1}/{total_iters}\n" +
-                         "\n".join(log_str))
+        self.logger.info("\n".join(log_str))
 
 
 def post_batch_log_running_loss(self, **kwargs):

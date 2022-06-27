@@ -136,6 +136,7 @@ class Trainer(Hooks):
         of :class:`trainer` itself as the first argument.
 
         """
+        # CHECK: Why do we initialize super() so late?
         super().__init__(self.logger)
         self._hooks = {"post_init_hook": [self.pp(initialize_seed)],
                        "pre_resume_hook": [],
@@ -146,6 +147,8 @@ class Trainer(Hooks):
                        "post_eval_hook": [self.pp(update_metrics)],
                        "pre_batch_hook": [self.pp(pre_batch_init_batch_vars)],
                        "post_batch_hook": [self.pp(post_batch_update_batch_vars)],
+                       "pre_update_call_hook": [],
+                       "post_update_call_hook": [],
                        "pre_training_hook": [self.pp(pre_train_log)],
                        "post_training_hook": [],
                        "pre_epoch_hook": [],
@@ -173,12 +176,14 @@ class Trainer(Hooks):
     @property
     def checkpoint_name(self) -> str:
         return "_".join([self._checkpoint_prefix, self._name,
-                         self._model.model_name, self.data["name"]]).replace(" ", "_")  # type: ignore
+                         self._model.model_name, self.data["name"]])\
+                  .replace(" ", "_")  # type: ignore
 
     @property
     def save_best_name(self) -> str:
         return "_".join([self._save_best_prefix, self._name,
-                         self._model.model_name, self.data["name"]]).replace(" ", "_")  # type: ignore
+                         self._model.model_name, self.data["name"]])\
+                  .replace(" ", "_")  # type: ignore
 
     @property
     def model(self) -> torch.nn.Module:
@@ -233,7 +238,7 @@ class Trainer(Hooks):
     @update_function.setter
     def update_function(self, func):
         if not isinstance(func, UpdateFunction):
-            self.logger.warning(f"{func} must be an instance of {UpdateFunction}")
+            self.logger.warning(f"{func} SHOULD be an instance of {UpdateFunction}")
             # FIXME: This doesn't do anything right now
         elif not callable(func):
             err_msg = f"Not Callable {func}"

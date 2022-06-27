@@ -160,3 +160,7 @@ def check_max(values):
         return True
     else:
         return False
+
+
+def have_cuda() -> bool:
+    return torch.cuda.is_available()

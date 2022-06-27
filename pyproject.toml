@@ -17,7 +17,7 @@ starlette = "^0.20.3"
 
 [tool.poetry.dev-dependencies]
 pytest = "^6.2.4"
-torchvision = "^0.10.0"
+torchvision = "0.*"
 pytest-cov = "^2.12.1"
 
 [build-system]
