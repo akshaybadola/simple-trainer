@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "simple_trainer"
-version = "0.3.3"
+version = "0.3.4"
 description = "A micro-training-framework on top of pytorch for Machine Learning and Deep Learning"
 authors = ["Akshay <atavist13@gmail.com>"]
 license = "MIT"
@@ -19,6 +19,10 @@ starlette = "^0.20.3"
 pytest = "^6.2.4"
 torchvision = "0.*"
 pytest-cov = "^2.12.1"
+pdbpp = {version = "*", optional = true, extras = ["debug"]}
+
+[tool.poetry.extras]
+debug = []
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]

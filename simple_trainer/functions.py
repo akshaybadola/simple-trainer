@@ -201,13 +201,13 @@ def maybe_anneal_lr(self, **kwargs):
     The learning rate is multiplied by the :code:`multiplier` (should be below 1).
 
     """
+    self.logger.debug(f"Running maybe_anneal_lr after epoch {self.epoch}")
     on = kwargs["on"]
     after_epoch = kwargs["after_epoch"]
     diff = kwargs["diff"]
     multiplier = kwargs["multiplier"]
     if self.epoch < after_epoch:
         return
-    self.logger.debug(f"Running maybe_anneal_lr after epoch {self.epoch}")
     values = [(k, v["total"]) for k, v in self._metrics["train"][on].items()]
     values.sort(key=lambda x: x[0])
     old_val = values[-2][1]

@@ -1,13 +1,13 @@
 import pytest
 import re
-from simple_trainer import hook_functions
+from simple_trainer import functions
 
 
 def test_trainer_should_log_post_batch_progress_after_adding_hook(capsys, trainer_with_mnist):
     trainer = trainer_with_mnist
     desc = trainer.describe_hook("post_batch_hook")
     if not any("post_batch_progress" in x for x in desc):
-        trainer.add_to_hook_at_end("post_batch_hook", hook_functions.post_batch_progress)
+        trainer.add_to_hook_at_end("post_batch_hook", functions.post_batch_progress)
     train_iter = trainer._dataloaders["train"].__iter__()
     test_iter = trainer._dataloaders["test"].__iter__()
     train_batch = train_iter.__next__()

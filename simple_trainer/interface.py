@@ -65,6 +65,11 @@ class Interface:
             # get some property of the trainer
             pass
 
+        @self.app.route("/list_cmds", methods=["GET"])
+        async def list_cmds():
+            # get some property of the trainer
+            pass
+
         @self.app.route("/set_prop", methods=["POST"])
         async def set_prop(request):
             data = request.json()

@@ -5,6 +5,7 @@ from simple_trainer.models import TrainerParams
 from simple_trainer.trainer import Trainer
 from simple_trainer.helpers import ClassificationFunc
 from simple_trainer.pipeline import Hooks
+from simple_trainer.interface import Interface
 
 from util import MLP, ToyDataset, Net
 
@@ -86,3 +87,8 @@ def hooks(trainer):
 
     hooks = Derived(trainer.logger)
     return hooks
+
+
+@pytest.fixture(scope="session")
+def iface(trainer):
+    yield Interface(host="127.0.0.1", port=11222, trainer=trainer, debug=True)

@@ -1,7 +1,7 @@
 import pytest
 import re
 from simple_trainer.helpers import ClassificationFunc
-from simple_trainer import hook_functions
+from simple_trainer import functions
 
 
 def test_trainer_init():
@@ -58,7 +58,7 @@ def test_trainer_should_log_post_batch_progress_at_correct_frequency(capsys, tra
     trainer.trainer_params.log_frequency = 5
     desc = trainer.describe_hook("post_batch_hook")
     if not any("post_batch_progress" in x for x in desc):
-        trainer.add_to_hook_at_end("post_batch_hook", hook_functions.post_batch_progress)
+        trainer.add_to_hook_at_end("post_batch_hook", functions.post_batch_progress)
     j = 0
     while True:
         train_batch = train_iter.__next__()

@@ -29,6 +29,7 @@ def increment_epoch(self):
 
 
 cmd = Tag("cmd")
+prop = Tag("prop")
 
 
 class Trainer(Hooks):
@@ -123,7 +124,7 @@ class Trainer(Hooks):
         else:
             self._model.to_ = lambda x: x.to(torch.device("cpu"))
 
-    def pp(self, func):
+    def _pp(self, func):
         return self._prepare_function(func)
 
     def _prepare_function(self, func):
@@ -138,21 +139,21 @@ class Trainer(Hooks):
         """
         # CHECK: Why do we initialize super() so late?
         super().__init__(self.logger)
-        self._hooks = {"post_init_hook": [self.pp(initialize_seed)],
+        self._hooks = {"post_init_hook": [self._pp(initialize_seed)],
                        "pre_resume_hook": [],
                        "post_resume_hook": [],
                        "pre_save_hook": [],
                        "post_save_hook": [],
-                       "pre_eval_hook": [self.pp(pre_eval_log)],
-                       "post_eval_hook": [self.pp(update_metrics)],
-                       "pre_batch_hook": [self.pp(pre_batch_init_batch_vars)],
-                       "post_batch_hook": [self.pp(post_batch_update_batch_vars)],
+                       "pre_eval_hook": [self._pp(pre_eval_log)],
+                       "post_eval_hook": [self._pp(update_metrics)],
+                       "pre_batch_hook": [self._pp(pre_batch_init_batch_vars)],
+                       "post_batch_hook": [self._pp(post_batch_update_batch_vars)],
                        "pre_update_call_hook": [],
                        "post_update_call_hook": [],
-                       "pre_training_hook": [self.pp(pre_train_log)],
+                       "pre_training_hook": [self._pp(pre_train_log)],
                        "post_training_hook": [],
                        "pre_epoch_hook": [],
-                       "post_epoch_hook": [*map(self.pp,
+                       "post_epoch_hook": [*map(self._pp,
                                                 [post_epoch_log,
                                                  partial(update_metrics, loop="train"),
                                                  maybe_validate, maybe_test,
@@ -168,6 +169,18 @@ class Trainer(Hooks):
         cmd.add(self.remove_from_hook)
         cmd.add(self.remove_from_hook_at)
         cmd.add(self.describe_hook)
+
+    @property
+    def cmds(self) -> List[str]:
+        return cmd.names
+
+    @property
+    def props(self) -> List[str]:
+        """Return all properties of the instance including except hidden properties
+        """
+        return [x for x, y in self.__class__.__dict__.items()
+                if isinstance(y, property) and x != "props"
+                and not x.startswith("_")]
 
     @property
     def name(self) -> str:
@@ -283,6 +296,7 @@ class Trainer(Hooks):
         """Return the directory where the logfiles are stored.
 
         There's no setter for this property as logger is initialized early.
+
         """
         return self._logdir
 
@@ -299,7 +313,6 @@ class Trainer(Hooks):
     @property
     def trainer_params(self) -> TrainerParams:
         """Return all the :class:`Trainer`'s training specific paramters.
-
 
         """
         return self._trainer_params
@@ -324,6 +337,15 @@ class Trainer(Hooks):
     def resume_path(self) -> Optional[Path]:
         return self._resume_path
 
+    def run_cmd(self, _cmd, *args, **kwargs):
+        """Run command `_cmd` with `args` and `kwargs`.
+
+        The commands are kept in :class:`Tag` `cmd` and the trainer
+        instance is passed as first argument to them
+
+        """
+        cmd[_cmd](self, *args, **kwargs)
+
     def _init_metrics(self):
         self._metrics: Dict[str, Dict[str, Dict]] = {}
         for x in ["train", "val", "test"]:
@@ -337,6 +359,7 @@ class Trainer(Hooks):
                 self.logger.error(err_msg)
                 raise AttributeError(err_msg)
 
+    @cmd
     def try_resume(self):
         self.run_hook("pre_resume_hook")
         if not self.resume_path:
@@ -408,12 +431,15 @@ class Trainer(Hooks):
         #     self.eval_one_batch(val_test, i, batch)
         self.run_hook_with_args("post_eval_hook", loop=val_test)
 
+    @cmd
     def validate(self):
         self._eval("val")
 
+    @cmd
     def test(self):
         self._eval("test")
 
+    @cmd
     def eval_one_batch(self, val_or_test, batch_num, total_iters, batch_time, batch):
         self.run_hook_with_args("pre_batch_hook", loop=val_or_test)
         with torch.no_grad():
@@ -429,6 +455,7 @@ class Trainer(Hooks):
                                 batch_num=batch_num, total_iters=total_iters,
                                 batch_time=batch_time)
 
+    @cmd
     def train_one_batch(self, batch_num, total_iters, batch_time, batch):
         self.run_hook_with_args("pre_batch_hook", loop="train")
         with self.timer:
@@ -442,6 +469,7 @@ class Trainer(Hooks):
                                 batch_num=batch_num, total_iters=total_iters,
                                 batch_time=batch_time)
 
+    @cmd
     def run_one_epoch(self):
         self.logger.info(f"Training epoch {self.epoch+1}")
         self.run_hook("pre_epoch_hook")
@@ -461,13 +489,19 @@ class Trainer(Hooks):
         #     self.train_one_batch(i, batch)
         self.run_hook("post_epoch_hook")
 
+    @cmd
     def train(self):
+        """Start training
+        """
         self.run_hook("pre_training_hook")
         while self.epoch < self.trainer_params.max_epochs:
             self.run_one_epoch()
         self.run_hook("post_training_hook")
         self.logger.info('Finished training')
 
+    @cmd
     def start(self):
+        """Start training after trying to resume.
+        """
         self.try_resume()
         self.train()
