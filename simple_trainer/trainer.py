@@ -124,11 +124,23 @@ class Trainer(Hooks):
         else:
             self._model.to_ = lambda x: x.to(torch.device("cpu"))
 
-    def _pp(self, func):
+    def _pp(self, func: Callable) -> partial:
+        """Alias for :meth:`_prepare_function`
+        """
         return self._prepare_function(func)
 
-    def _prepare_function(self, func):
-        return partial(func, self)
+    def _prepare_function(self, func: Callable) -> partial:
+        """Function to replace first argument as :class:`Trainer` instance
+        It's applied to all the hooks.
+
+        Args:
+            func: The function to modify
+
+        """
+        if isinstance(func, partial):
+            return partial(func.func, self, *func.args, **func.keywords)
+        else:
+            return partial(func, self)
 
     def _init_hooks(self):
         """Initialize all hooks.
@@ -441,7 +453,8 @@ class Trainer(Hooks):
 
     @cmd
     def eval_one_batch(self, val_or_test, batch_num, total_iters, batch_time, batch):
-        self.run_hook_with_args("pre_batch_hook", loop=val_or_test)
+        self.run_hook_with_args("pre_batch_hook", loop=val_or_test,
+                                batch_num=batch_num)
         with torch.no_grad():
             with self.timer:
                 self.update_function.train = False
@@ -457,7 +470,8 @@ class Trainer(Hooks):
 
     @cmd
     def train_one_batch(self, batch_num, total_iters, batch_time, batch):
-        self.run_hook_with_args("pre_batch_hook", loop="train")
+        self.run_hook_with_args("pre_batch_hook", loop="train",
+                                batch_num=batch_num)
         with self.timer:
             self.update_function.train = True
             self.model.train()
