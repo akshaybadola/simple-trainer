@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "simple_trainer"
-version = "0.3.4"
+version = "0.3.5"
 description = "A micro-training-framework on top of pytorch for Machine Learning and Deep Learning"
 authors = ["Akshay <atavist13@gmail.com>"]
 license = "MIT"

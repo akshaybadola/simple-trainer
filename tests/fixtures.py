@@ -1,3 +1,7 @@
+from multiprocessing import Process
+import time
+
+import requests
 import pytest
 import torch
 import torchvision
@@ -37,7 +41,7 @@ def trainer(toy_data):
     return trainer
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def trainer_with_mnist():
     params = {"gpus": 0, "cuda": True, "seed": 1111, "resume": False, "metrics":
               ["loss", "accuracy"], "log_frequency": 1, "test_frequency": 1,
@@ -90,5 +94,14 @@ def hooks(trainer):
 
 
 @pytest.fixture(scope="session")
-def iface(trainer):
-    yield Interface(host="127.0.0.1", port=11222, trainer=trainer, debug=True)
+def iface(trainer_with_mnist):
+    trainer = trainer_with_mnist
+    host = "127.0.0.1"
+    port = 11222
+    iface = Interface(host=host, port=port, trainer=trainer, debug=True)
+    iface.init_routes()
+    iface_proc = Process(target=iface.start)
+    iface_proc.start()
+    time.sleep(.5)
+    yield iface
+    iface_proc.terminate()

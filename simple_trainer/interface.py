@@ -1,11 +1,16 @@
 from typing import Dict, Any, Optional, Union
 import base64
 import json
+import sys
+import time
+import asyncio
 
 from starlette.applications import Starlette
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 import uvicorn
+
+from . import __version__
 
 # from oauth2client.client import OAuth2Credentials
 # from googleapiclient import discovery
@@ -60,24 +65,43 @@ class Interface:
             print(data)
             return JSONResponse("Received" + str(data))
 
-        @self.app.route("/get_prop", methods=["GET"])
-        async def get_prop():
+        @self.app.route("/props", methods=["GET"])
+        async def props(request):
             # get some property of the trainer
-            pass
+            props = [*map(str, self.trainer.props)]
+            return JSONResponse(props)
+
+        @self.app.route("/props/{prop:str}", methods=["GET"])
+        async def get_prop(request):
+            """Get some property of the trainer"""
+            prop = request.path_params["prop"]
+            prop = getattr(self.trainer, prop, None)
+            return JSONResponse(str(prop))
 
         @self.app.route("/list_cmds", methods=["GET"])
-        async def list_cmds():
-            # get some property of the trainer
-            pass
+        async def list_cmds(request):
+            """Get :code:`trainer` commands
+
+            """
+            return JSONResponse(self.trainer.cmds)
 
         @self.app.route("/set_prop", methods=["POST"])
         async def set_prop(request):
+            """Set some :code:`trainer` property
+
+            """
             data = request.json()
             prop, value = data["prop"], data["value"]
             setattr(self.trainer, prop, value)
 
         @self.app.route("/call_cmd", methods=["GET"])
         async def call_cmd(request):
+            """Call some :code:`trainer` command
+
+            Command can be :code:`add_hook` or something.
+
+
+            """
             # call some trainer command like add_hook or something
             #
             # Primarily we'll modify trainer with hooks. We won't load/unload
@@ -86,7 +110,12 @@ class Interface:
             data = request.json
             cmd, args = data["cmd"], data["args"]
             if hasattr(self.trainer, cmd):
-                getattr(self.trainer, cmd)(*args)
+                val = getattr(self.trainer, cmd)(*args)
+            return JSONResponse(val)
+
+        @self.app.route("/version", methods=["GET"])
+        async def version(request):
+            return JSONResponse(__version__)
 
         # @self.app.route("/add_user", methods=["POST"])
         # async def add_user():
@@ -97,13 +126,21 @@ class Interface:
         #     except Exception as e:
         #         return f"Error {e}"
 
+        @self.app.route("/shutdown", methods=["GET"])
+        async def shutdown(request):
+            await self.server.shutdown()
+            return JSONResponse("Shutting Down")
+
+        self.config = uvicorn.Config(self.app, host=self.host, port=self.port)
+        self.server = uvicorn.Server(config=self.config)
+
     def send_mail(self):
         # Send a mail to user if a failure happens or training completes
         # Or any other events to send
         pass
 
     def start(self):
-        uvicorn.run(self.app, host=self.host, port=self.port)
+        self.server.run()
 
 
 def main():

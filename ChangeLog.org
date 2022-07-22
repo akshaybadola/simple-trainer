@@ -15,3 +15,8 @@
    - Put ~model.eval()~ and ~torch.no_grad()~ before evaluating batch
    - There's commented code also for batch time logging. It should be integrated
      with controls
+
+** [2022-07-22 Fri 09:20]
+   - A bit more progress on ~interface~
+   - Shutdown via request works on ~interface~ now
+   - Added ~iface~ to ~fixtures.py~
