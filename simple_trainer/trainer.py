@@ -400,7 +400,15 @@ class Trainer(Hooks):
             self.model.module.load_state_dict(saved_state['model_state_dict'])
         else:
             self.model.load_state_dict(saved_state['model_state_dict'])
-        self.optimizer.load_state_dict(saved_state['optimizer_state_dict'])
+        if hasattr(self, "load_optimizer"):
+            self.logger.info("Will load optimizer from custom \"load_optimizer\"")
+            optimizer_state = self.load_optimizer(saved_state['optimizer_state_dict'])
+        else:
+            optimizer_state = saved_state['optimizer_state_dict']
+        self.optimizer.load_state_dict(optimizer_state)
+        if hasattr(self, "load_extra"):
+            self.logger.info("Loading extra state")
+            self.load_extra(saved_state)
         self._metrics = saved_state["metrics"]
         self.trainer_params = saved_state["params"]
         self.extra_opts = saved_state["extra_opts"]
@@ -409,18 +417,34 @@ class Trainer(Hooks):
     def _save(self, name):
         self.run_hook("pre_save_hook")
         save_name = name if name.endswith(".pth") else name + ".pth"
-        if isinstance(self.model, torch.nn.parallel.DataParallel):
-            state_dict = self.model.module.state_dict()
+        if hasattr(self, "save_optimizer") and hasattr(self, "load_optimizer"):
+            self.logger.info("Will save according to custom \"save_optmizer\"")
+            optimizer_state_dict = self.save_optimizer()
         else:
-            state_dict = self.model.state_dict()
-        torch.save({'model_state_dict': state_dict,
-                    'optimizer_state_dict': self.optimizer.state_dict(),
+            optimizer_state_dict = self.optimizer.state_dict()
+        if hasattr(self, "save_model") and hasattr(self, "load_model"):
+            self.logger.info("Will save according to custom \"save_model\"")
+            model_state_dict = self.save_model()
+        else:
+            if isinstance(self.model, torch.nn.parallel.DataParallel):
+                model_state_dict = self.model.module.state_dict()
+            else:
+                model_state_dict = self.model.state_dict()
+        if hasattr(self, "save_extra"):
+            extra_saves = self.save_extra()
+        else:
+            extra_saves = {}
+        if extra_saves:
+            self.logger.info(f"Will save extra state for {extra_saves.keys()}")
+        torch.save({'model_state_dict': model_state_dict,
+                    'optimizer_state_dict': optimizer_state_dict,
                     'metrics': self.metrics,
                     "epoch": self.epoch,
                     'data_name': self.data["name"],
                     'model_name': self._model.model_name,
                     'params': self.trainer_params.__dict__,
-                    'extra_opts': self.extra_opts},
+                    'extra_opts': self.extra_opts,
+                    **extra_saves},
                    self.savedir.joinpath(save_name))
         self.run_hook("post_save_hook")
 
@@ -462,7 +486,7 @@ class Trainer(Hooks):
                 with torch.no_grad():
                     retval = self.update_function(batch=batch, criterion=self.criterion,
                                                   model=self.model, optimizer=self.optimizer,
-                                                  trainer=self)
+                                                  trainer=self, batch_num=batch_num)
         retval.update(self.timer.as_dict)
         self.run_hook_with_args("post_batch_hook", loop=val_or_test, retval=retval,
                                 batch_num=batch_num, total_iters=total_iters,
@@ -477,7 +501,7 @@ class Trainer(Hooks):
             self.model.train()
             retval = self.update_function(batch=batch, criterion=self.criterion,
                                           model=self.model, optimizer=self.optimizer,
-                                          trainer=self)
+                                          trainer=self, batch_num=batch_num)
         retval.update(self.timer.as_dict)
         self.run_hook_with_args("post_batch_hook", loop="train", retval=retval,
                                 batch_num=batch_num, total_iters=total_iters,
