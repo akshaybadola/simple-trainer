@@ -107,9 +107,9 @@ def post_batch_progress(self, **kwargs):
         log_str.append(f"Total time taken for forward (+ backward) pass for {loop}: {update_func_time}")
         log_str.append(f"Estimated time taken for last {lf} batches for {loop}: {total_time_taken}")
         log_str.append("Estimated time taken per data_point for last " +
-                       f"{lf} batches for {loop}: {total_time_taken/total_points}")
-        log_str.append(f"Estimated total time for {loop}: {avg_time_taken * total_iters}")
-        log_str.append(f"Estimated time remaining for {loop}: {avg_time_taken * (total_iters-(batch_num+1))}")
+                       f"{lf} batches for {loop} loop: {total_time_taken/total_points}")
+        log_str.append(f"Estimated total time for {loop} loop: {avg_time_taken * total_iters}")
+        log_str.append(f"Estimated time remaining for {loop} loop: {avg_time_taken * (total_iters-(batch_num+1))}")
         self.logger.info("\n".join(log_str))
 
 
@@ -172,7 +172,7 @@ def maybe_validate(self):
     self.logger.debug("Running maybe_validate")
     freq = self.trainer_params.val_frequency
     if self.epoch % freq == (freq - 1):
-        if self.dataloaders["val"] is not None:
+        if "val" in self.dataloaders and self.dataloaders["val"] is not None:
             self.validate()
         else:
             self.logger.info("No val loader. Skipping")
@@ -182,7 +182,7 @@ def maybe_test(self):
     self.logger.debug("Running maybe_test")
     freq = self.trainer_params.test_frequency
     if self.epoch % freq == (freq - 1):
-        if self.dataloaders["test"] is not None:
+        if "test" in self.dataloaders and self.dataloaders["test"] is not None:
             self.test()
         else:
             self.logger.info("No test loader. Skipping")
@@ -222,6 +222,15 @@ def maybe_anneal_lr(self, **kwargs):
 def save_checkpoint(self):
     self.logger.info(f"Saving to {self.checkpoint_name}")
     self._save(self.checkpoint_name)
+
+
+def post_batch_save_checkpoint(self, batch_num_for_saving, **kwargs):
+    batch_num = kwargs["batch_num"]
+    if not (batch_num+1) % batch_num_for_saving:
+        prefix = f"{batch_num:06}_"
+        save_name = f"{prefix}_{self.checkpoint_name}"
+        self.logger.info(f"Saving to {save_name}")
+        self._save(save_name)
 
 
 def save_best(self):

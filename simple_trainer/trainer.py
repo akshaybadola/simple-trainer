@@ -53,7 +53,7 @@ class Trainer(Hooks):
         self.log_file, self.logger = get_file_and_stream_logger(str(self._logdir), name,
                                                                 name, "debug",
                                                                 "info", "debug",
-                                                                new_file=True)
+                                                                new_file=False)
         self._name = name
         self.data = data
         self._dataloaders = dataloaders
@@ -227,7 +227,7 @@ class Trainer(Hooks):
             self.logger.error("Training data cannot be None")
             return
         for x in ["train", "val", "test"]:
-            if data[x] is not None:
+            if data.get(x, None) and data[x] is not None:
                 if not iter(data[x]):
                     self.logger.error("Dataset must be iterable")
                 else:
@@ -408,7 +408,7 @@ class Trainer(Hooks):
         self.optimizer.load_state_dict(optimizer_state)
         if hasattr(self, "load_extra"):
             self.logger.info("Loading extra state")
-            self.load_extra(saved_state)
+            self.load_extra(self, saved_state)
         self._metrics = saved_state["metrics"]
         self.trainer_params = saved_state["params"]
         self.extra_opts = saved_state["extra_opts"]
@@ -431,7 +431,7 @@ class Trainer(Hooks):
             else:
                 model_state_dict = self.model.state_dict()
         if hasattr(self, "save_extra"):
-            extra_saves = self.save_extra()
+            extra_saves = self.save_extra(self)
         else:
             extra_saves = {}
         if extra_saves:
@@ -508,7 +508,7 @@ class Trainer(Hooks):
                                 batch_time=batch_time)
 
     @cmd
-    def run_one_epoch(self):
+    def run_one_epoch(self, testing=False):
         self.logger.info(f"Training epoch {self.epoch+1}")
         self.run_hook("pre_epoch_hook")
         total_iters = len(self.dataloaders["train"])
@@ -521,10 +521,11 @@ class Trainer(Hooks):
                 self.train_one_batch(i, total_iters, batch_time=self.timer.time,
                                      batch=batch)
                 i += 1
+                if testing:
+                    if i == 2:
+                        break
         except StopIteration:
             pass
-        # for i, batch in enumerate(self.dataloaders["train"]):
-        #     self.train_one_batch(i, batch)
         self.run_hook("post_epoch_hook")
 
     @cmd
@@ -543,3 +544,20 @@ class Trainer(Hooks):
         """
         self.try_resume()
         self.train()
+
+    @cmd
+    def test_loops(self):
+        """Test all the loops to see if everything works
+        Run only two batches.
+        """
+        self.logger.warning("After testing the loops, " +
+                            "please make sure to reinitialize the dataloader and model, " +
+                            "as the weights and next batch etc would have changed.")
+        self.run_hook("pre_training_hook")
+        self.run_one_epoch(testing=True)
+        self.try_resume()
+        self.run_one_epoch(testing=True)
+        # TODO: Add this in later maybe
+        # self.post_testing_cleanup()
+        self.run_hook("post_training_hook")
+        self.logger.info('Finished testing the loops')
