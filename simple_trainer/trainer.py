@@ -1,5 +1,6 @@
 from typing import Union, List, Optional, Any, Callable, Iterable, Dict
 
+import atexit
 import os
 from functools import partial
 from pathlib import Path
@@ -11,6 +12,7 @@ from common_pyutil.decorators import Tag
 from common_pyutil.monitor import Timer
 from common_pyutil.log import get_file_and_stream_logger
 
+from .prefetch import Prefetcher
 from .pipeline import Hooks
 
 from .models import TrainerParams, DDPParams, UpdateFunction
@@ -67,6 +69,7 @@ class Trainer(Hooks):
         else:
             self._ddp_params = None
         self._epoch = 0
+        self._maybe_init_prefetchers()
         self._init_model()
         self._init_metrics()
         self._init_hooks()
@@ -81,7 +84,7 @@ class Trainer(Hooks):
                 self.trainer_params.resume_checkpoint)
         elif self.trainer_params.resume_best:
             if not bool([*self.savedir.iterdir()]):
-                msg = f"No saves in savedir yet"
+                msg = "No saves in savedir yet"
                 self.logger.debug(msg)
             else:
                 save_files = [*self.savedir.iterdir()]
@@ -98,8 +101,29 @@ class Trainer(Hooks):
         for func in post_init_hooks:
             self.add_to_hook("post_init_hook", func, "last")
         self._batch_vars: Dict[str, Any] = {}
-        self.extra_opts = extra_opts
+        self._extra_opts = extra_opts
         self.run_hook("post_init_hook")
+        atexit.register(self._maybe_join_prefetchers)
+
+    def _maybe_init_prefetchers(self):
+        self._prefetchers = {}
+        if self.trainer_params.use_prefetch:
+            for k in self.dataloaders:
+                if self.dataloaders[k] is not None:
+                    self._prefetchers[k] = Prefetcher(self.dataloaders[k])
+                else:
+                    self._prefetchers[k] = None
+
+    def _maybe_join_prefetchers(self):
+        for k, v in self._prefetchers.items():
+            if v is not None:
+                self.logger.info(f"Joining prefetcher for {k}")
+                v.join()
+
+    def _maybe_join_prefetcher(self, **kwargs):
+        loop = kwargs["loop"]
+        if self._prefetchers[loop] is not None:
+            self._prefetchers[loop].join()
 
     def _init_model(self):
         if not hasattr(self._model, "model_name"):
@@ -124,12 +148,12 @@ class Trainer(Hooks):
         else:
             self._model.to_ = lambda x: x.to(torch.device("cpu"))
 
-    def _pp(self, func: Callable) -> partial:
+    def _pp(self, func: Callable) -> Callable:
         """Alias for :meth:`_prepare_function`
         """
         return self._prepare_function(func)
 
-    def _prepare_function(self, func: Callable) -> partial:
+    def _prepare_function(self, func: Callable) -> Callable:
         """Function to replace first argument as :class:`Trainer` instance
         It's applied to all the hooks.
 
@@ -138,9 +162,15 @@ class Trainer(Hooks):
 
         """
         if isinstance(func, partial):
-            return partial(func.func, self, *func.args, **func.keywords)
+            if hasattr(func.func, "__self__"):
+                return func
+            else:
+                return partial(func.func, self, *func.args, **func.keywords)
         else:
-            return partial(func, self)
+            if hasattr(func, "__self__"):
+                return func
+            else:
+                return partial(func, self)
 
     def _init_hooks(self):
         """Initialize all hooks.
@@ -181,6 +211,8 @@ class Trainer(Hooks):
         cmd.add(self.remove_from_hook)
         cmd.add(self.remove_from_hook_at)
         cmd.add(self.describe_hook)
+        self.add_to_hook("post_epoch_hook", partial(self._maybe_join_prefetcher, loop="train"))
+        self.add_to_hook("post_eval_hook", self._maybe_join_prefetcher)
 
     @property
     def cmds(self) -> List[str]:
@@ -349,6 +381,10 @@ class Trainer(Hooks):
     def resume_path(self) -> Optional[Path]:
         return self._resume_path
 
+    @property
+    def extra_opts(self) -> Dict:
+        return self._extra_opts
+
     def run_cmd(self, _cmd, *args, **kwargs):
         """Run command `_cmd` with `args` and `kwargs`.
 
@@ -411,7 +447,7 @@ class Trainer(Hooks):
             self.load_extra(self, saved_state)
         self._metrics = saved_state["metrics"]
         self.trainer_params = saved_state["params"]
-        self.extra_opts = saved_state["extra_opts"]
+        self._extra_opts = saved_state["extra_opts"]
         self.run_hook("post_resume_hook")
 
     def _save(self, name):
@@ -448,24 +484,28 @@ class Trainer(Hooks):
                    self.savedir.joinpath(save_name))
         self.run_hook("post_save_hook")
 
-    def _eval(self, val_test, debug=False):
-        loader = self.dataloaders[val_test]
-        self.run_hook_with_args("pre_eval_hook", loop=val_test)
+    def _eval(self, eval_loop_name, debug=False):
+        loader = self.dataloaders[eval_loop_name]
+        self.run_hook_with_args("pre_eval_hook", loop=eval_loop_name)
         total_iters = len(loader)
-        it = loader.__iter__()
+        if not self.trainer_params.use_prefetch:
+            it = loader.__iter__()
         i = 0
         try:
             while True:
                 with self.timer:
-                    batch = it.__next__()
-                self.eval_one_batch(val_test, i, total_iters, batch_time=self.timer.time,
+                    if self.trainer_params.use_prefetch:
+                        batch = self._prefetchers[eval_loop_name].get()
+                    else:
+                        batch = it.__next__()
+                self.eval_one_batch(eval_loop_name, i, total_iters, batch_time=self.timer.time,
                                     batch=batch)
                 i += 1
         except StopIteration:
             pass
         # for i, batch in enumerate(loader):
-        #     self.eval_one_batch(val_test, i, batch)
-        self.run_hook_with_args("post_eval_hook", loop=val_test)
+        #     self.eval_one_batch(eval_loop_name, i, batch)
+        self.run_hook_with_args("post_eval_hook", loop=eval_loop_name)
 
     @cmd
     def validate(self):
@@ -508,21 +548,27 @@ class Trainer(Hooks):
                                 batch_time=batch_time)
 
     @cmd
-    def run_one_epoch(self, testing=False):
+    def run_one_epoch(self, testing=False, num_iters=2):
         self.logger.info(f"Training epoch {self.epoch+1}")
         self.run_hook("pre_epoch_hook")
         total_iters = len(self.dataloaders["train"])
-        it = self.dataloaders["train"].__iter__()
+        if self.trainer_params.use_prefetch:
+            self._prefetchers["train"].start()
+        else:
+            it = self.dataloaders["train"].__iter__()
         i = 0
         try:
             while True:
                 with self.timer:
-                    batch = it.__next__()
+                    if self.trainer_params.use_prefetch:
+                        batch = self._prefetchers["train"].get()
+                    else:
+                        batch = it.__next__()
                 self.train_one_batch(i, total_iters, batch_time=self.timer.time,
                                      batch=batch)
                 i += 1
                 if testing:
-                    if i == 2:
+                    if i == num_iters:
                         break
         except StopIteration:
             pass
@@ -546,7 +592,7 @@ class Trainer(Hooks):
         self.train()
 
     @cmd
-    def test_loops(self):
+    def test_loops(self, num_iters=2):
         """Test all the loops to see if everything works
         Run only two batches.
         """
@@ -554,7 +600,7 @@ class Trainer(Hooks):
                             "please make sure to reinitialize the dataloader and model, " +
                             "as the weights and next batch etc would have changed.")
         self.run_hook("pre_training_hook")
-        self.run_one_epoch(testing=True)
+        self.run_one_epoch(testing=True, num_iters=num_iters)
         self.try_resume()
         self.run_one_epoch(testing=True)
         # TODO: Add this in later maybe

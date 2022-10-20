@@ -124,6 +124,7 @@ class TrainerParams(BaseModel):
         resume_best: Resume from the previously best state
         resume_checkpoint: Resume from given weights
         resume: Whether to resume or not.
+        use_prefetch: Whether to use Prefetcher to fetch data from the dataloader.
         metrics: A list of names of which values to track
         val_frequency: How often to validate terms of `epoch`
         log_frequency: How often to log terms of `epoch`
@@ -146,6 +147,7 @@ class TrainerParams(BaseModel):
     resume_checkpoint: Optional[Path]
     resume_best: Optional[bool]
     resume: bool
+    use_prefetch: bool
     metrics: List[str]
     val_frequency: Optional[int] = 1
     log_frequency: Optional[int] = 5

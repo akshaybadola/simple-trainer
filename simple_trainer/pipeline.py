@@ -116,10 +116,14 @@ class Hooks(abc.ABC):
     def check_func_args(self, func: Callable):
         if isinstance(func, partial):
             n_args = func.func.__code__.co_argcount
+            if hasattr(func.func, "__self__"):
+                n_args -= 1
             if n_args != len(func.args):
                 raise AttributeError("Partial function must be fully specified")
         else:
             n_args = func.__code__.co_argcount
+            if hasattr(func, "__self__"):
+                n_args -= 1
             if n_args:
                 raise AttributeError("Function to the hook cannot take any arguments")
 
