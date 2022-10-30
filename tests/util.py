@@ -34,6 +34,7 @@ class MLP(torch.nn.Module):
         self.layer = torch.nn.Sequential(torch.nn.Linear(in_shape, out_shape), torch.nn.ReLU(False))
 
     def forward(self, x):
+        x = x.view(x.shape[0], -1)
         return self.layer(x)
 
 
@@ -43,7 +44,7 @@ class ToyDataset(torch.utils.data.Dataset):
         self.name = "test_data"
 
     def __getitem__(self, indx):
-        return self.data[0][indx], self.data[1], indx
+        return self.data[0][indx], self.data[1][indx]
 
     def __len__(self):
         return self.data[0].shape[0]

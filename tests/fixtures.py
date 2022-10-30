@@ -30,7 +30,7 @@ def trainer(toy_data):
               "val_frequency": 1, "max_epochs": 100}
     update_function = ClassificationFunc()
     from torch.optim import SGD
-    model = MLP(10, 10)
+    model = MLP(100, 10)
     model.model_name = "MLP"
     optimizer = SGD(model.parameters(), lr=0.01, momentum=0.9)
     train_data, train_dataloader, val_data, val_dataloader = toy_data

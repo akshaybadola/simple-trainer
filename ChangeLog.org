@@ -20,3 +20,12 @@
    - A bit more progress on ~interface~
    - Shutdown via request works on ~interface~ now
    - Added ~iface~ to ~fixtures.py~
+
+** [2022-10-30 Sun 10:46]
+   - Added "all" while updating metrics
+   - Added ~use_prefetch~ to trainer_params
+   - Fixed function args checking in pipeline
+   - Fixed some bugs in prefetch
+   - Fixed some bugs in prefetchers in trainer
+   - Fixed ~MLP~ in tests
+   - Added test_prefetch.py

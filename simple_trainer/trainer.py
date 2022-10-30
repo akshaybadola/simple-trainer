@@ -102,8 +102,8 @@ class Trainer(Hooks):
             self.add_to_hook("post_init_hook", func, "last")
         self._batch_vars: Dict[str, Any] = {}
         self._extra_opts = extra_opts
-        self.run_hook("post_init_hook")
         atexit.register(self._maybe_join_prefetchers)
+        self.run_hook("post_init_hook")
 
     def _maybe_init_prefetchers(self):
         self._prefetchers = {}
@@ -114,15 +114,25 @@ class Trainer(Hooks):
                 else:
                     self._prefetchers[k] = None
 
+    def _maybe_start_and_get_prefetcher(self, loop):
+        if self.trainer_params.use_prefetch and self._prefetchers[loop] is not None:
+            if self._prefetchers[loop].finished:
+                self._prefetchers[loop].re_init()
+            self._prefetchers[loop].start()
+            return self._prefetchers[loop]
+        else:
+            return None
+
     def _maybe_join_prefetchers(self):
         for k, v in self._prefetchers.items():
             if v is not None:
                 self.logger.info(f"Joining prefetcher for {k}")
+                v.finish()
                 v.join()
 
-    def _maybe_join_prefetcher(self, **kwargs):
-        loop = kwargs["loop"]
+    def _maybe_join_prefetcher(self, loop):
         if self._prefetchers[loop] is not None:
+            self._prefetchers[loop].finish()
             self._prefetchers[loop].join()
 
     def _init_model(self):
@@ -211,8 +221,11 @@ class Trainer(Hooks):
         cmd.add(self.remove_from_hook)
         cmd.add(self.remove_from_hook_at)
         cmd.add(self.describe_hook)
-        self.add_to_hook("post_epoch_hook", partial(self._maybe_join_prefetcher, loop="train"))
-        self.add_to_hook("post_eval_hook", self._maybe_join_prefetcher)
+
+    @property
+    def order(self) -> List[str]:
+        """The order of execution of the pipeline"""
+        pass
 
     @property
     def cmds(self) -> List[str]:
@@ -427,11 +440,13 @@ class Trainer(Hooks):
             if x not in saved_state:
                 raise AttributeError(f"Key {x} not in saved state")
         if saved_state['model_name'] != self.model.model_name:
-            raise AttributeError("Error. Trying to load from a different model")
+            raise AttributeError("Error. Trying to load from a different model\n" +
+                                 "Use force resume if you want to do this")
         if saved_state["data_name"] != self.data["name"]:
-            raise AttributeError("Error. Trying to load a different dataset")
+            raise AttributeError("Error. Trying to load a different dataset\n" +
+                                 "Use force resume if you want to do this")
         self._epoch = saved_state["epoch"]
-        self.logger.info(f"Resuming from checkpoint at _epoch {self.epoch}")
+        self.logger.info(f"Resuming from checkpoint at end of epoch {self.epoch+1}")
         if isinstance(self.model, torch.nn.parallel.DataParallel):
             self.model.module.load_state_dict(saved_state['model_state_dict'])
         else:
@@ -446,8 +461,18 @@ class Trainer(Hooks):
             self.logger.info("Loading extra state")
             self.load_extra(self, saved_state)
         self._metrics = saved_state["metrics"]
+        for k, v in self.trainer_params.dict().items():
+            if k in saved_state["params"] and v != saved_state['params'][k]:
+                self.logger.warning(f"Param {k} is overwritten from args. " +
+                                    f"Old value {saved_state['params'][k]}, new value {v}")
+                saved_state["params"][k] = self.trainer_params.dict()[k]
         self.trainer_params = saved_state["params"]
-        self._extra_opts = saved_state["extra_opts"]
+        for k, v in self.extra_opts.items():
+            if k in saved_state["extra_opts"] and v != saved_state["extra_opts"][k]:
+                self.logger.warning(f"Extra opt {k} is overwritten from args. " +
+                                    f"Old value {saved_state['extra_opts'][k]}, new value {v}")
+            elif k not in saved_state["extra_opts"]:
+                self.logger.warning(f"New option {k} in extra_opts.")
         self.run_hook("post_resume_hook")
 
     def _save(self, name):
@@ -484,17 +509,21 @@ class Trainer(Hooks):
                    self.savedir.joinpath(save_name))
         self.run_hook("post_save_hook")
 
+    def _next_batch(self, loop_name):
+        pass
+
     def _eval(self, eval_loop_name, debug=False):
         loader = self.dataloaders[eval_loop_name]
         self.run_hook_with_args("pre_eval_hook", loop=eval_loop_name)
         total_iters = len(loader)
-        if not self.trainer_params.use_prefetch:
+        prefetcher = self._maybe_start_and_get_prefetcher(eval_loop_name)
+        if prefetcher is None:
             it = loader.__iter__()
         i = 0
         try:
             while True:
                 with self.timer:
-                    if self.trainer_params.use_prefetch:
+                    if prefetcher is not None:
                         batch = self._prefetchers[eval_loop_name].get()
                     else:
                         batch = it.__next__()
@@ -502,9 +531,7 @@ class Trainer(Hooks):
                                     batch=batch)
                 i += 1
         except StopIteration:
-            pass
-        # for i, batch in enumerate(loader):
-        #     self.eval_one_batch(eval_loop_name, i, batch)
+            self._maybe_join_prefetcher(eval_loop_name)
         self.run_hook_with_args("post_eval_hook", loop=eval_loop_name)
 
     @cmd
@@ -552,16 +579,15 @@ class Trainer(Hooks):
         self.logger.info(f"Training epoch {self.epoch+1}")
         self.run_hook("pre_epoch_hook")
         total_iters = len(self.dataloaders["train"])
-        if self.trainer_params.use_prefetch:
-            self._prefetchers["train"].start()
-        else:
+        prefetcher = self._maybe_start_and_get_prefetcher("train")
+        if prefetcher is None:
             it = self.dataloaders["train"].__iter__()
         i = 0
         try:
             while True:
                 with self.timer:
-                    if self.trainer_params.use_prefetch:
-                        batch = self._prefetchers["train"].get()
+                    if prefetcher is not None:
+                        batch = prefetcher.get()
                     else:
                         batch = it.__next__()
                 self.train_one_batch(i, total_iters, batch_time=self.timer.time,
@@ -571,7 +597,7 @@ class Trainer(Hooks):
                     if i == num_iters:
                         break
         except StopIteration:
-            pass
+            self._maybe_join_prefetcher("train")
         self.run_hook("post_epoch_hook")
 
     @cmd

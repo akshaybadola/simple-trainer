@@ -1,3 +1,5 @@
+import copy
+
 import torch
 import numpy as np
 
@@ -35,13 +37,12 @@ def pre_val_log(self):
 
 
 def pre_batch_init_batch_vars(self, **kwargs):
-    """Intialize variables after a batch ends
+    """Intialize with empty values in :code:`trainer.Trainer.batch_vars`
 
-    Vars are stored in the trainer as :code:`trainer.Trainer.batch_vars`
+    :code:`kwargs` must have have current "loop"
 
     Args:
         self: Trainer instance
-
     """
 
     loop = kwargs["loop"]
@@ -142,7 +143,7 @@ def post_epoch_log(self):
     self.logger.debug(f"Finished epoch {self.epoch+1}")
 
 
-def update_metrics(self, **kwargs):
+def update_metrics(self, quiet=False, **kwargs):
     """Update the metrics in `trainer.Trainer`.
 
     For each loop's keys, we append all the variables which exist in values
@@ -153,19 +154,22 @@ def update_metrics(self, **kwargs):
 
     """
     loop = kwargs["loop"]
-    self.logger.debug("Running update_metrics")
+    if not quiet:
+        self.logger.debug("Running update_metrics")
     for m in self._metrics[loop]:
-        total = np.sum(self._batch_vars[loop]['total'])
-        total_value = np.sum(self._batch_vars[loop][m])
-        avg_value = total_value / total
         if m not in self._metrics[loop]:
             self._metrics[loop][m] = {}
-        self._metrics[loop][m][self.epoch] = {"total": total_value, "average": avg_value}
+        num_points = np.sum(self._batch_vars[loop]['total'])
+        metric_value = np.sum(self._batch_vars[loop][m])
+        avg_value = metric_value / num_points
+        self._metrics[loop][m][self.epoch] = {"total": metric_value, "average": avg_value,
+                                              "all": copy.deepcopy(self._batch_vars[loop][m])}
         # self._metrics[loop][m][self.epoch]["average"] = avg_value
-        self.logger.info(f'Total {loop} {m} of the network on ' +
-                         f'{total} data instances is: {total_value}')
-        self.logger.info(f'Average {loop} {m} of the network on ' +
-                         f'{total} data instances is: {avg_value}')
+        if not quiet:
+            self.logger.info(f'Total {loop} {m} of the network on ' +
+                             f'{num_points} data instances is: {metric_value}')
+            self.logger.info(f'Average {loop} {m} of the network on ' +
+                             f'{num_points} data instances is: {avg_value}')
 
 
 def maybe_validate(self):
@@ -225,9 +229,10 @@ def save_checkpoint(self):
 
 
 def post_batch_save_checkpoint(self, batch_num_for_saving, **kwargs):
+    epoch = self.epoch + 1
     batch_num = kwargs["batch_num"]
     if not (batch_num+1) % batch_num_for_saving:
-        prefix = f"{batch_num:06}_"
+        prefix = f"{(batch_num+1):06}_{epoch}"
         save_name = f"{prefix}_{self.checkpoint_name}"
         self.logger.info(f"Saving to {save_name}")
         self._save(save_name)

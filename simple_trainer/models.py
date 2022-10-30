@@ -147,7 +147,7 @@ class TrainerParams(BaseModel):
     resume_checkpoint: Optional[Path]
     resume_best: Optional[bool]
     resume: bool
-    use_prefetch: bool
+    use_prefetch: Optional[bool] = False
     metrics: List[str]
     val_frequency: Optional[int] = 1
     log_frequency: Optional[int] = 5
